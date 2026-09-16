@@ -1,0 +1,4 @@
+interface:
+  display_name: "Subscription Squad"
+  short_description: "Muse implementation and Grok review, led by Codex"
+  default_prompt: "Use $subscription-squad to complete this task using my existing OpenCode and Cursor subscriptions while minimizing Codex usage."
