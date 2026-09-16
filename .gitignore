@@ -1,3 +1,5 @@
+# Python, OS, and subscription-squad run artifacts (run dirs and collector
+# state stay outside the repo; these entries are a backstop).
 __pycache__/
 *.py[cod]
 .DS_Store
@@ -6,3 +8,6 @@ __pycache__/
 !.env.example
 .task-runs/
 run-artifacts/
+
+# Local provider state must never be published.
+.opencode/

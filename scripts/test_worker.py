@@ -51,7 +51,7 @@ if af:
 ef = os.environ.get('STUB_ENV_FILE')
 if ef:
     data = {}
-    for k in ('OPENCODE_CONFIG_CONTENT','OPENCODE_CONFIG','OPENCODE_PERMISSION','CURSOR_API_KEY','CURSOR_API_ENDPOINT'):
+    for k in ('OPENCODE_CONFIG_CONTENT','OPENCODE_CONFIG','OPENCODE_PERMISSION','CURSOR_API_KEY','CURSOR_API_ENDPOINT','OPENAI_API_KEY','ANTHROPIC_API_KEY','GEMINI_API_KEY','GOOGLE_API_KEY','XAI_API_KEY','GROQ_API_KEY','OPENROUTER_API_KEY','OPENCODE_API_KEY','OPENCODE_GO_API_KEY','GH_TOKEN','GITHUB_TOKEN','AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY','AWS_SESSION_TOKEN','CUSTOM_TOKEN','CUSTOM_SECRET','CUSTOM_API_KEY'):
         if k in os.environ:
             data[k] = os.environ[k]
     pathlib.Path(ef).write_text(json.dumps(data))
@@ -105,6 +105,12 @@ if len(sys.argv) >= 2 and sys.argv[1] == 'run':
         subprocess.run(['git', '-C', ws, 'add', 'owned.txt'])
         print(json.dumps({'type': 'text', 'text': 'staged'}))
         sys.exit(0)
+    elif beh == 'move_head_only':
+        tree = subprocess.run(['git', '-C', ws, 'rev-parse', 'HEAD^{tree}'], capture_output=True, text=True).stdout.strip()
+        new = subprocess.run(['git', '-C', ws, 'commit-tree', tree, '-m', 'head move'], capture_output=True, text=True).stdout.strip()
+        subprocess.run(['git', '-C', ws, 'update-ref', 'HEAD', new], check=True)
+        print(json.dumps({'type': 'text', 'text': 'SQUAD_STATUS: complete\\nhead moved'}))
+        sys.exit(0)
     else:
         print(json.dumps({'type': 'text', 'text': 'hello candidate', 'sessionID': 'ses_1', 'model': 'opencode-go/muse-spark-1.3-contributor'}))
         sys.exit(0)
@@ -120,7 +126,7 @@ if af:
 ef = os.environ.get('STUB_ENV_FILE')
 if ef:
     data = {}
-    for k in ('CURSOR_API_KEY','CURSOR_API_ENDPOINT','OPENCODE_CONFIG_CONTENT'):
+    for k in ('CURSOR_API_KEY','CURSOR_API_ENDPOINT','OPENCODE_CONFIG_CONTENT','OPENCODE_CONFIG','OPENCODE_PERMISSION','OPENAI_API_KEY','ANTHROPIC_API_KEY','GEMINI_API_KEY','GOOGLE_API_KEY','XAI_API_KEY','GROQ_API_KEY','OPENROUTER_API_KEY','OPENCODE_API_KEY','OPENCODE_GO_API_KEY','GH_TOKEN','GITHUB_TOKEN','AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY','AWS_SESSION_TOKEN','CUSTOM_TOKEN','CUSTOM_SECRET','CUSTOM_API_KEY'):
         if k in os.environ:
             data[k] = os.environ[k]
     pathlib.Path(ef).write_text(json.dumps(data))
@@ -200,6 +206,15 @@ class WorkerTests(unittest.TestCase):
             'OPENCODE_CONFIG_CONTENT': 'inherited-prompt',
             'OPENCODE_CONFIG': '/tmp/x',
             'OPENCODE_PERMISSION': 'y',
+            'OPENAI_API_KEY': 'sk-inherited',
+            'ANTHROPIC_API_KEY': 'sk-ant-inherited',
+            'GH_TOKEN': 'gh-inherited',
+            'AWS_SECRET_ACCESS_KEY': 'aws-inherited',
+            'CURSOR_API_KEY': 'cursor-inherited',
+            'CURSOR_API_ENDPOINT': 'https://inherited',
+            'CUSTOM_TOKEN': 'tok-inherited',
+            'CUSTOM_SECRET': 'sec-inherited',
+            'CUSTOM_API_KEY': 'key-inherited',
             'STUB_BEHAVIOR': 'ok',
         }
         r = invoke(['--workspace', str(ws), '--provider', 'muse', '--mode', 'ask',
@@ -246,6 +261,9 @@ class WorkerTests(unittest.TestCase):
         self.assertNotEqual(envdump['OPENCODE_CONFIG_CONTENT'], 'inherited-prompt')
         self.assertNotIn('OPENCODE_CONFIG', envdump)
         self.assertNotIn('OPENCODE_PERMISSION', envdump)
+        for k in ('OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GH_TOKEN', 'AWS_SECRET_ACCESS_KEY',
+                  'CURSOR_API_KEY', 'CURSOR_API_ENDPOINT', 'CUSTOM_TOKEN', 'CUSTOM_SECRET', 'CUSTOM_API_KEY'):
+            self.assertNotIn(k, envdump)
 
     def test_muse_work_config_edit_allow(self):
         ws = make_workspace()
@@ -278,6 +296,8 @@ class WorkerTests(unittest.TestCase):
         env_file = stubdir / 'env.json'
         env = {'SUBSCRIPTION_SQUAD_CURSOR_BIN': str(stub), 'STUB_ARGV_FILE': str(argv_file),
                'STUB_ENV_FILE': str(env_file), 'CURSOR_API_KEY': 'secret', 'CURSOR_API_ENDPOINT': 'https://x',
+               'OPENAI_API_KEY': 'sk-inherited', 'GH_TOKEN': 'gh-inherited',
+               'OPENCODE_CONFIG_CONTENT': 'inherited-prompt', 'CUSTOM_TOKEN': 'tok-inherited',
                'STUB_BEHAVIOR': 'ok'}
         r = invoke(['--workspace', str(ws), '--provider', 'grok', '--mode', 'ask',
                     '--trust', '--run-dir', str(run_dir), 'hello grok'], env_extra=env)
@@ -297,6 +317,10 @@ class WorkerTests(unittest.TestCase):
         envdump = json.loads(env_file.read_text())
         self.assertNotIn('CURSOR_API_KEY', envdump)
         self.assertNotIn('CURSOR_API_ENDPOINT', envdump)
+        self.assertNotIn('OPENAI_API_KEY', envdump)
+        self.assertNotIn('GH_TOKEN', envdump)
+        self.assertNotIn('OPENCODE_CONFIG_CONTENT', envdump)
+        self.assertNotIn('CUSTOM_TOKEN', envdump)
 
     def test_unsupported_variant(self):
         ws = make_workspace()
@@ -659,6 +683,120 @@ class WorkerTests(unittest.TestCase):
         result = (run_dir / 'result.txt').read_text()
         self.assertIn('keep me', result)
         self.assertNotIn('drop me', result)
+
+    def test_sanitized_provider_env_shared(self):
+        base = dict(os.environ)
+        base.update({'OPENAI_API_KEY': 'sk-x', 'GH_TOKEN': 'g', 'AWS_SECRET_ACCESS_KEY': 's',
+                     'OPENCODE_CONFIG_CONTENT': 'x', 'OPENCODE_CONFIG': 'y', 'OPENCODE_PERMISSION': 'z',
+                     'CURSOR_API_KEY': 'c', 'CURSOR_API_ENDPOINT': 'e',
+                     'CUSTOM_TOKEN': 't', 'CUSTOM_SECRET': 's', 'CUSTOM_API_KEY': 'k'})
+        with patch.dict(os.environ, base, clear=True):
+            # Preserve normal env and fixture controls that do not look like credentials.
+            os.environ['HOME'] = '/home/tester'
+            os.environ['PATH'] = '/usr/bin'
+            os.environ['STUB_BEHAVIOR'] = 'ok'
+            os.environ['SUBSCRIPTION_SQUAD_OPENCODE_BIN'] = '/tmp/opencode'
+            env = W.sanitized_provider_env()
+            for k in ('OPENAI_API_KEY', 'GH_TOKEN', 'AWS_SECRET_ACCESS_KEY', 'OPENCODE_CONFIG_CONTENT',
+                      'OPENCODE_CONFIG', 'OPENCODE_PERMISSION', 'CURSOR_API_KEY', 'CURSOR_API_ENDPOINT',
+                      'CUSTOM_TOKEN', 'CUSTOM_SECRET', 'CUSTOM_API_KEY'):
+                self.assertNotIn(k, env)
+            self.assertEqual(env['HOME'], '/home/tester')
+            self.assertEqual(env['STUB_BEHAVIOR'], 'ok')
+            self.assertEqual(env['SUBSCRIPTION_SQUAD_OPENCODE_BIN'], '/tmp/opencode')
+
+    def test_muse_preflight_filtered_env_and_generated_config(self):
+        ws = make_workspace()
+        stubdir = pathlib.Path(tempfile.mkdtemp(prefix='stub-'))
+        stub = stubdir / 'opencode'
+        write_stub(stub, MUSE_STUB)
+        env_file = stubdir / 'env.json'
+        env = {'SUBSCRIPTION_SQUAD_OPENCODE_BIN': str(stub), 'STUB_ENV_FILE': str(env_file),
+               'STUB_INVENTORY_MODE': 'ok', 'OPENCODE_CONFIG_CONTENT': 'inherited',
+               'OPENCODE_CONFIG': '/tmp/x', 'OPENAI_API_KEY': 'sk-x', 'GH_TOKEN': 'g',
+               'CUSTOM_SECRET': 's', 'CURSOR_API_KEY': 'c'}
+        r = invoke(['--workspace', str(ws), '--provider', 'muse', '--check'], env_extra=env)
+        self.assertEqual(r.returncode, 0, msg=r.stderr.decode()[:1000])
+        envdump = json.loads(env_file.read_text())
+        self.assertIn('OPENCODE_CONFIG_CONTENT', envdump)
+        self.assertNotEqual(envdump['OPENCODE_CONFIG_CONTENT'], 'inherited')
+        cfg = json.loads(envdump['OPENCODE_CONFIG_CONTENT'])
+        self.assertEqual(cfg['enabled_providers'], ['opencode-go'])
+        self.assertEqual(cfg['share'], 'disabled')
+        self.assertEqual(cfg['permission']['edit'], 'deny')
+        self.assertEqual(cfg['permission']['webfetch'], 'allow')
+        for k in ('OPENCODE_CONFIG', 'OPENAI_API_KEY', 'GH_TOKEN', 'CUSTOM_SECRET', 'CURSOR_API_KEY'):
+            self.assertNotIn(k, envdump)
+
+    def test_grok_preflight_filtered_env(self):
+        ws = make_workspace()
+        stubdir = pathlib.Path(tempfile.mkdtemp(prefix='stub-'))
+        stub = stubdir / 'cursor-agent'
+        write_stub(stub, CURSOR_STUB)
+        env_file = stubdir / 'env.json'
+        env = {'SUBSCRIPTION_SQUAD_CURSOR_BIN': str(stub), 'STUB_ENV_FILE': str(env_file),
+               'STUB_INVENTORY_MODE': 'ok', 'CURSOR_API_KEY': 'secret',
+               'OPENAI_API_KEY': 'sk-x', 'OPENCODE_CONFIG_CONTENT': 'inherited'}
+        r = invoke(['--workspace', str(ws), '--provider', 'grok', '--check'], env_extra=env)
+        self.assertEqual(r.returncode, 0, msg=r.stderr.decode()[:1000])
+        envdump = json.loads(env_file.read_text())
+        self.assertNotIn('CURSOR_API_KEY', envdump)
+        self.assertNotIn('OPENAI_API_KEY', envdump)
+        self.assertNotIn('OPENCODE_CONFIG_CONTENT', envdump)
+
+    def test_parse_grok_session_id_variants(self):
+        for key, val in (('session_id', 'a1'), ('sessionID', 'ses_g'), ('sessionId', 'c3')):
+            raw = json.dumps({'type': 'result', 'subtype': 'success', 'result': 'hi',
+                              'is_error': False, key: val}).encode()
+            _, meta, err = W.parse_grok_output(raw)
+            self.assertFalse(err)
+            self.assertEqual(meta.get(key), val)
+
+    def test_grok_session_native_end_to_end(self):
+        ws = make_workspace()
+        stubdir = pathlib.Path(tempfile.mkdtemp(prefix='stub-'))
+        stub = stubdir / 'cursor-agent'
+        write_stub(stub, CURSOR_STUB)
+        run_dir = pathlib.Path(tempfile.mkdtemp(prefix='runs-')) / 'run1'
+        r = invoke(['--workspace', str(ws), '--provider', 'grok', '--run-dir', str(run_dir), 'hi'],
+                   env_extra={'SUBSCRIPTION_SQUAD_CURSOR_BIN': str(stub), 'STUB_BEHAVIOR': 'ok'})
+        self.assertEqual(r.returncode, 0, msg=r.stderr.decode()[:1000] + r.stdout.decode()[:1000])
+        receipt = json.loads((run_dir / 'receipt.json').read_text())
+        self.assertEqual(receipt.get('session_native'), 'ses_g')
+        self.assertEqual(receipt.get('native_meta', {}).get('sessionID'), 'ses_g')
+
+    def test_head_only_movement_marks_unprotected(self):
+        ws = make_workspace()
+        stubdir = pathlib.Path(tempfile.mkdtemp(prefix='stub-'))
+        stub = stubdir / 'opencode'
+        write_stub(stub, MUSE_STUB)
+        run_dir = pathlib.Path(tempfile.mkdtemp(prefix='runs-')) / 'run1'
+        r = invoke(['--workspace', str(ws), '--provider', 'muse', '--run-dir', str(run_dir), 'hi'],
+                   env_extra={'SUBSCRIPTION_SQUAD_OPENCODE_BIN': str(stub), 'STUB_BEHAVIOR': 'move_head_only'})
+        self.assertEqual(r.returncode, 3, msg=r.stdout.decode()[:2000] + r.stderr.decode()[:2000])
+        receipt = json.loads((run_dir / 'receipt.json').read_text())
+        self.assertTrue(receipt.get('scope_violation'))
+        self.assertFalse(receipt.get('protected_content_unchanged'))
+        self.assertNotEqual(receipt.get('head_before'), receipt.get('head_after'))
+        self.assertEqual(receipt.get('changed_paths'), [])
+        self.assertEqual(receipt.get('index_changed_paths'), [])
+
+    def test_run_dir_mode_0700(self):
+        ws = make_workspace()
+        stubdir = pathlib.Path(tempfile.mkdtemp(prefix='stub-'))
+        stub = stubdir / 'opencode'
+        write_stub(stub, MUSE_STUB)
+        rundir_parent = tempfile.mkdtemp(prefix='runs-')
+        run_dir = pathlib.Path(rundir_parent) / 'run1'
+        old = os.umask(0o022)
+        try:
+            r = invoke(['--workspace', str(ws), '--provider', 'muse', '--run-dir', str(run_dir), 'hi'],
+                       env_extra={'SUBSCRIPTION_SQUAD_OPENCODE_BIN': str(stub), 'STUB_BEHAVIOR': 'ok'})
+        finally:
+            os.umask(old)
+        self.assertEqual(r.returncode, 0, msg=r.stderr.decode()[:1000])
+        mode = stat.S_IMODE(os.stat(run_dir).st_mode)
+        self.assertEqual(mode, 0o700)
 
 
 if __name__ == '__main__':

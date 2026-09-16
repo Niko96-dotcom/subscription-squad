@@ -1,0 +1,42 @@
+name: Feature request
+description: Propose a scoped improvement. Never include secrets.
+title: "[feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Do not paste secrets, tokens, credentials, private logs, or
+        customer code. Keep the proposal scoped to this packaging
+        (docs, examples, CI, templates) or precisely describe any
+        runtime change and its CLI contract impact.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      placeholder: What task is hard or error-prone today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      placeholder: What should change? Name the files and flags involved.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      placeholder: What else did you consider, and why not?
+    validations:
+      required: false
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and compatibility
+      placeholder: |
+        Affected CLIs or docs:
+        Backwards-compatible? (yes/no + detail):
+    validations:
+      required: false

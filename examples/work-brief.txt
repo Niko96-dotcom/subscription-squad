@@ -1,0 +1,28 @@
+Goal: <one outcome, e.g. fix cursor pagination in src/owned_file.py>
+
+Owned paths (must match the --allow-path flags on the command line):
+- src/owned_file.py
+- tests/test_owned_file.py
+
+Read first:
+- src/owned_file.py
+- tests/test_owned_file.py
+
+Frozen behavior:
+- <describe the exact behavior contract and acceptance examples>
+
+Acceptance criteria:
+- <observable criterion 1>
+- <observable criterion 2, e.g. focused test command passes>
+
+Prohibited side effects:
+- Do not commit, install packages, or access or emit secrets.
+- Change only the owned paths above; preserve all other content.
+
+Notes for the coordinator (not the worker): the runner appends fixed
+worker instructions automatically, including the owned-path list and the
+requirement to finish with a first line of exactly
+`SQUAD_STATUS: complete|partial|blocked|needs_context` in <=500 words.
+Keep this brief small: goal, inputs, frozen behavior, acceptance,
+prohibitions. Save the brief outside the target checkout and pass it with
+--prompt-file; use a fresh --run-dir outside the checkout.

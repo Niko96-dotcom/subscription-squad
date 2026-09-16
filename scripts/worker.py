@@ -21,6 +21,31 @@ MUSE_MODEL = "opencode-go/muse-spark-1.3-contributor"
 MUSE_VARIANT = "xhigh"
 GROK_MODEL = "cursor-grok-4.6-xhigh"
 
+# Exact inherited overrides/credentials filtered from provider subprocesses.
+# Suffixes cover additional *_TOKEN / *_SECRET / *_API_KEY style credentials.
+# Filtering is not a sandbox: unusual credential names and on-disk CLI config
+# remain trusted. HOME/PATH/XDG and on-disk logins are preserved.
+_CREDENTIAL_EXACT = frozenset({
+    'OPENCODE_CONFIG_CONTENT', 'OPENCODE_CONFIG', 'OPENCODE_PERMISSION',
+    'CURSOR_API_KEY', 'CURSOR_API_ENDPOINT',
+    'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY',
+    'XAI_API_KEY', 'GROQ_API_KEY', 'OPENROUTER_API_KEY',
+    'OPENCODE_API_KEY', 'OPENCODE_GO_API_KEY',
+    'GH_TOKEN', 'GITHUB_TOKEN',
+    'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN',
+})
+_CREDENTIAL_SUFFIXES = ('_API_KEY', '_APIKEY', '_TOKEN', '_SECRET')
+
+
+def sanitized_provider_env():
+    """Shared filtered environment for preflight and worker subprocesses."""
+    env = dict(os.environ)
+    for key in list(env.keys()):
+        upper = key.upper()
+        if upper in _CREDENTIAL_EXACT or upper.endswith(_CREDENTIAL_SUFFIXES):
+            env.pop(key, None)
+    return env
+
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
@@ -102,10 +127,9 @@ def interrupted(signum, frame):
     raise InterruptedError(f'received signal {signum}')
 
 
-def preflight(command, timeout):
-    env = dict(os.environ)
-    for key in ('CURSOR_API_KEY', 'CURSOR_API_ENDPOINT'):
-        env.pop(key, None)
+def preflight(command, timeout, env=None):
+    if env is None:
+        env = sanitized_provider_env()
     proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True, env=env)
     try:
         raw, _ = proc.communicate(timeout=timeout)
@@ -281,7 +305,7 @@ def parse_grok_output(data):
         return '', {}, True
     if not isinstance(obj, dict) or obj.get('type') != 'result':
         return '', {}, True
-    meta = {k: obj[k] for k in ('session_id', 'usage', 'model', 'request_id') if k in obj}
+    meta = {k: obj[k] for k in ('session_id', 'sessionID', 'sessionId', 'usage', 'model', 'request_id') if k in obj}
     result = obj.get('result', '')
     if not isinstance(result, str):
         result = ''
@@ -350,7 +374,9 @@ def main(argv=None):
         if not opencode_bin or not os.access(opencode_bin, os.X_OK):
             parser.error('opencode CLI not found or not executable')
         if args.check:
-            raw = preflight([opencode_bin, 'models', 'opencode-go', '--verbose'], min(args.timeout, 30))
+            check_env = sanitized_provider_env()
+            check_env['OPENCODE_CONFIG_CONTENT'] = json.dumps(build_opencode_config('ask', [], step_budget))
+            raw = preflight([opencode_bin, 'models', 'opencode-go', '--verbose'], min(args.timeout, 30), env=check_env)
             if not muse_inventory_ok(raw):
                 raise ValueError(f'exact Muse model variant is not available: {MUSE_MODEL} variant {MUSE_VARIANT}')
             print(f'subscription_squad_check=ok provider=muse model={MUSE_MODEL} variant={MUSE_VARIANT}')
@@ -407,7 +433,7 @@ def main(argv=None):
         parser.error('--run-dir must be fresh and outside the workspace')
     if run_arg.exists():
         parser.error('--run-dir must be fresh and must not already exist')
-    run_arg.mkdir(parents=True, exist_ok=False)
+    run_arg.mkdir(parents=True, exist_ok=False, mode=0o700)
     run = run_arg.resolve()
     if run == workspace or run.is_relative_to(workspace) or workspace.is_relative_to(run):
         parser.error('--run-dir must be fresh and outside the workspace')
@@ -437,9 +463,7 @@ def main(argv=None):
         if provider == 'muse':
             command = [opencode_bin, 'run', '--pure', '--dir', str(workspace), '--model', MUSE_MODEL,
                        '--variant', 'xhigh', '--format', 'json', '--agent', 'squad-worker', final_prompt]
-            child_env = dict(os.environ)
-            for k in ('OPENCODE_CONFIG_CONTENT', 'OPENCODE_CONFIG', 'OPENCODE_PERMISSION'):
-                child_env.pop(k, None)
+            child_env = sanitized_provider_env()
             child_env['OPENCODE_CONFIG_CONTENT'] = json.dumps(build_opencode_config(args.mode, owned, step_budget))
         else:
             command = cursor_base_argv(cursor_bin) + ['--print', '--output-format', 'json', '--workspace', str(workspace), '--model', GROK_MODEL]
@@ -448,9 +472,7 @@ def main(argv=None):
             if args.mode == 'ask':
                 command += ['--mode', 'ask']
             command.append(final_prompt)
-            child_env = dict(os.environ)
-            for k in ('CURSOR_API_KEY', 'CURSOR_API_ENDPOINT'):
-                child_env.pop(k, None)
+            child_env = sanitized_provider_env()
         process = None
         started = time.monotonic()
         code = 1
@@ -488,7 +510,7 @@ def main(argv=None):
                 outside = [k for k in changed if not any(Path(k) == p or p in Path(k).parents for p in owned)]
                 head_after = git(workspace, 'rev-parse', 'HEAD').stdout.decode().strip()
                 receipt.update(changed_paths=changed, index_changed_paths=sorted(index_changed), out_of_scope_paths=outside,
-                               protected_content_unchanged=(not outside and not index_changed),
+                               protected_content_unchanged=(not outside and not index_changed and head_after == head_before),
                                head_after=head_after,
                                git_status_after_sha256=digest(git(workspace, 'status', '--porcelain=v1', '-z').stdout))
                 if outside or index_changed or head_after != head_before:

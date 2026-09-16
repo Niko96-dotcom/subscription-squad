@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-labelledby="squad-banner-title squad-banner-desc">
+  <title id="squad-banner-title">Subscription Squad banner</title>
+  <desc id="squad-banner-desc">Dark slate banner reading Subscription Squad, with the subtitle Codex coordinates, Muse implements, Grok reviews.</desc>
+  <rect width="1200" height="300" rx="16" fill="#1f2937"/>
+  <rect x="64" y="60" width="6" height="180" rx="3" fill="#38bdf8"/>
+  <text x="104" y="148" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="64" font-weight="600" fill="#f8fafc">Subscription Squad</text>
+  <text x="106" y="202" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="26" fill="#cbd5e1">Codex coordinates &#183; Muse implements &#183; Grok reviews</text>
+  <text x="106" y="240" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="18" fill="#94a3b8">Bounded delegation over existing subscriptions &#183; receipts, not promises</text>
+</svg>

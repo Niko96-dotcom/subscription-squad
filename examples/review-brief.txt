@@ -1,0 +1,22 @@
+Goal: independent read-only review of the attached change.
+
+Change under review (paste the actual diff and surrounding context):
+<diff here>
+
+Acceptance criteria it was supposed to meet:
+- <criterion 1>
+- <criterion 2>
+
+Test evidence provided with the candidate:
+- <commands run and their real output>
+
+Deliver: findings with file/line, concrete consequence, and evidence for
+each defect. No stylistic churn. End with a clear verdict (accept / fix
+required). You have no tools in this packet; if bounded read-only
+investigation is truly needed, say exactly which files and why.
+
+Notes for the coordinator (not the worker): run this with
+--provider grok --mode ask (read-only, no --allow-path). Add --trust only
+for an already authorized/trusted workspace or a fixture you created.
+Keep the packet self-contained; the runner appends the fixed review
+instructions and the SQUAD_STATUS handoff requirement automatically.

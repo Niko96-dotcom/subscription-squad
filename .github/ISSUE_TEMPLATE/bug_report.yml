@@ -1,0 +1,55 @@
+name: Bug report
+description: Report a reproducible problem. Never include secrets.
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Do not paste secrets, tokens, credentials, private logs, private
+        personal data, or customer code. Redact paths and identifiers.
+        Security-sensitive reports belong at
+        `/security/advisories/new` on this repository, not here.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      placeholder: What happened, in one or two sentences?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Command run (with placeholder paths, e.g. --workspace /ABSOLUTE/checkout)
+        2. ...
+        3. Observed result, including exit code and receipt status fields
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs. actual
+      placeholder: What did you expect, and what did you get instead?
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: |
+        OS (macOS/Linux version):
+        python3 --version:
+        opencode version (if relevant):
+        cursor agent version (if relevant):
+        make ci result (pass/fail + failing output excerpt):
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      placeholder: Anything else relevant (redacted). Keep excerpts short.
+    validations:
+      required: false
