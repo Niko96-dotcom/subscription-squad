@@ -148,8 +148,8 @@ unittest discovery over `scripts/test_*.py`. Tests use local stub CLIs
 and temp dirs — no network, no providers, no secrets.
 
 CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) checks out source
-with pinned `actions/checkout v4.2.2`, provisions Python 3.10 and 3.12 with
-pinned `actions/setup-python v5.6.0` on `ubuntu-latest` and `macos-latest`,
+with pinned `actions/checkout v7.0.1`, provisions Python 3.10 and 3.12 with
+pinned `actions/setup-python v7.0.0` on `ubuntu-latest` and `macos-latest`,
 then runs `make ci` with minimal `contents: read`, `persist-credentials: false`,
 and `timeout-minutes: 10`. No live providers, no secrets, nothing published.
 

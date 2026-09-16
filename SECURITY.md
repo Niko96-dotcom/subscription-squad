@@ -78,8 +78,8 @@ never reads `output.log`.
 
 Unit tests (`scripts/test_*.py`) use local stub CLIs and temporary
 directories only. They make no network or provider calls. CI checks out
-source with pinned `actions/checkout v4.2.2` (`persist-credentials: false`),
-provisions Python 3.10 and 3.12 with pinned `actions/setup-python v5.6.0`
+source with pinned `actions/checkout v7.0.1` (`persist-credentials: false`),
+provisions Python 3.10 and 3.12 with pinned `actions/setup-python v7.0.0`
 on `ubuntu-latest` and `macos-latest`, then runs `make ci`
 (`compileall` plus unittest discovery). It uses minimal `contents: read`
 permissions, `timeout-minutes: 10`, no secrets, no live providers, and
