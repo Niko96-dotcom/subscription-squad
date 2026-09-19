@@ -16,6 +16,8 @@ import worker as W
 WORKER = pathlib.Path(__file__).with_name('worker.py')
 MUSE = W.MUSE_MODEL
 GROK = W.GROK_MODEL
+GROK_BUILD = W.GROK_BUILD_MODEL
+AGY = W.ANTIGRAVITY_MODEL
 
 
 def run_git(*args, cwd):
@@ -178,6 +180,92 @@ def invoke(args, env_extra=None):
     if env_extra:
         env.update(env_extra)
     return subprocess.run([sys.executable, str(WORKER), *args], capture_output=True, env=env, timeout=60)
+
+
+GROK_BUILD_STUB = """#!/usr/bin/env python3
+import sys, os, json, pathlib
+af = os.environ.get('STUB_ARGV_FILE')
+if af:
+    pathlib.Path(af).write_text(json.dumps(sys.argv))
+ef = os.environ.get('STUB_ENV_FILE')
+if ef:
+    data = {}
+    for k in ('OPENCODE_CONFIG_CONTENT','OPENCODE_CONFIG','OPENCODE_PERMISSION','CURSOR_API_KEY','CURSOR_API_ENDPOINT','OPENAI_API_KEY','ANTHROPIC_API_KEY','GEMINI_API_KEY','GOOGLE_API_KEY','XAI_API_KEY','GROQ_API_KEY','OPENROUTER_API_KEY','OPENCODE_API_KEY','OPENCODE_GO_API_KEY','GH_TOKEN','GITHUB_TOKEN','AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY','AWS_SESSION_TOKEN','CUSTOM_TOKEN','CUSTOM_SECRET','CUSTOM_API_KEY'):
+        if k in os.environ:
+            data[k] = os.environ[k]
+    pathlib.Path(ef).write_text(json.dumps(data))
+if 'models' in sys.argv:
+    mode = os.environ.get('STUB_INVENTORY_MODE', 'ok')
+    if mode == 'missing':
+        print('other-model  Other')
+    else:
+        print('grok-4.6  Grok model')
+        print('other-model  Other')
+    sys.exit(0)
+if '--single' in sys.argv:
+    beh = os.environ.get('STUB_BEHAVIOR', 'ok')
+    if beh == 'cancelled':
+        print(json.dumps({'text': 'partial thought', 'stopReason': 'cancelled', 'sessionId': 'ses_cancel', 'requestId': 'req_1', 'usage': {'input': 5}, 'num_turns': 1, 'total_cost_usd': 0.01, 'modelUsage': 'grok-4.6-build'}))
+        sys.exit(0)
+    elif beh == 'empty':
+        print(json.dumps({'text': '', 'stopReason': 'stop', 'sessionId': 'ses_e', 'modelUsage': 'grok-4.6-build'}))
+        sys.exit(0)
+    elif beh == 'malformed':
+        print('not json at all')
+        sys.exit(0)
+    elif beh == 'error_key':
+        print(json.dumps({'text': 'hi', 'stopReason': 'stop', 'error': 'boom', 'modelUsage': 'grok-4.6-build'}))
+        sys.exit(0)
+    else:
+        print(json.dumps({'text': 'grok build ok', 'stopReason': 'stop', 'sessionId': 'ses_gb', 'requestId': 'req_gb', 'thought': 'reasoning', 'usage': {'input': 10}, 'num_turns': 1, 'total_cost_usd': 0.02, 'modelUsage': 'grok-4.6-build'}))
+        sys.exit(0)
+print('unexpected grok-build stub', file=sys.stderr)
+sys.exit(2)
+"""
+
+ANTIGRAVITY_STUB = """#!/usr/bin/env python3
+import sys, os, json, pathlib
+af = os.environ.get('STUB_ARGV_FILE')
+if af:
+    pathlib.Path(af).write_text(json.dumps(sys.argv))
+ef = os.environ.get('STUB_ENV_FILE')
+if ef:
+    data = {}
+    for k in ('OPENCODE_CONFIG_CONTENT','OPENCODE_CONFIG','OPENCODE_PERMISSION','CURSOR_API_KEY','CURSOR_API_ENDPOINT','OPENAI_API_KEY','ANTHROPIC_API_KEY','GEMINI_API_KEY','GOOGLE_API_KEY','XAI_API_KEY','GROQ_API_KEY','OPENROUTER_API_KEY','OPENCODE_API_KEY','OPENCODE_GO_API_KEY','GH_TOKEN','GITHUB_TOKEN','AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY','AWS_SESSION_TOKEN','CUSTOM_TOKEN','CUSTOM_SECRET','CUSTOM_API_KEY'):
+        if k in os.environ:
+            data[k] = os.environ[k]
+    pathlib.Path(ef).write_text(json.dumps(data))
+cf = os.environ.get('STUB_CWD_FILE')
+if cf:
+    pathlib.Path(cf).write_text(os.getcwd())
+if 'models' in sys.argv:
+    mode = os.environ.get('STUB_INVENTORY_MODE', 'ok')
+    if mode == 'missing':
+        print('other-model  Other')
+    else:
+        print('gemini-3.8-flash-high  Gemini 3.8 Flash (High)')
+        print('other-model  Other')
+    sys.exit(0)
+if any(a.startswith('--print=') for a in sys.argv):
+    beh = os.environ.get('STUB_BEHAVIOR', 'ok')
+    if beh == 'empty_response':
+        print(json.dumps({'conversation_id': 'conv_e', 'status': 'SUCCESS', 'response': '', 'duration_seconds': 1, 'num_turns': 1, 'usage': {'input': 5}, 'denied_actions': []}))
+        sys.exit(0)
+    elif beh == 'denied':
+        print(json.dumps({'conversation_id': 'conv_d', 'status': 'SUCCESS', 'response': 'hi', 'duration_seconds': 1, 'num_turns': 1, 'usage': {'input': 5}, 'denied_actions': [{'action': 'edit'}]}))
+        sys.exit(0)
+    elif beh == 'nonsuccess':
+        print(json.dumps({'conversation_id': 'conv_f', 'status': 'FAILED', 'response': 'hi', 'duration_seconds': 1, 'num_turns': 1, 'usage': {}, 'denied_actions': []}))
+        sys.exit(0)
+    elif beh == 'malformed':
+        print('not json')
+        sys.exit(0)
+    else:
+        print(json.dumps({'conversation_id': 'conv_ok', 'status': 'SUCCESS', 'response': 'agy ok', 'duration_seconds': 2, 'num_turns': 1, 'usage': {'input': 7}, 'denied_actions': []}))
+        sys.exit(0)
+print('unexpected agy stub', file=sys.stderr)
+sys.exit(2)
+"""
 
 
 class WorkerTests(unittest.TestCase):
@@ -797,6 +885,447 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, msg=r.stderr.decode()[:1000])
         mode = stat.S_IMODE(os.stat(run_dir).st_mode)
         self.assertEqual(mode, 0o700)
+
+    def test_grok_build_ask_argv_env(self):
+        ws = make_workspace()
+        stubdir = pathlib.Path(tempfile.mkdtemp(prefix='stub-'))
+        stub = stubdir / 'grok'
+        write_stub(stub, GROK_BUILD_STUB)
+        run_dir = pathlib.Path(tempfile.mkdtemp(prefix='runs-')) / 'run1'
+        argv_file = stubdir / 'argv.json'
+        env_file = stubdir / 'env.json'
+        env = {'SUBSCRIPTION_SQUAD_GROK_BUILD_BIN': str(stub), 'STUB_ARGV_FILE': str(argv_file),
+               'STUB_ENV_FILE': str(env_file), 'CURSOR_API_KEY': 'secret',
+               'OPENAI_API_KEY': 'sk-x', 'OPENCODE_CONFIG_CONTENT': 'inherited',
+               'CUSTOM_TOKEN': 't', 'STUB_BEHAVIOR': 'ok'}
+        r = invoke(['--workspace', str(ws), '--provider', 'grok-build', '--mode', 'ask',
+                    '--run-dir', str(run_dir), 'hello build'], env_extra=env)
+        self.assertEqual(r.returncode, 0, msg=r.stderr.decode()[:2000] + r.stdout.decode()[:2000])
+        argv = json.loads(argv_file.read_text())
+        self.assertEqual(argv[argv.index('--cwd') + 1], str(ws.resolve()))
+        self.assertEqual(argv[argv.index('--model') + 1], GROK_BUILD)
+        self.assertEqual(argv[argv.index('--reasoning-effort') + 1], 'xhigh')
+        self.assertEqual(argv[argv.index('--permission-mode') + 1], 'plan')
+        self.assertIn('--no-subagents', argv)
+        self.assertIn('--disable-web-search', argv)
+        self.assertEqual(argv[argv.index('--output-format') + 1], 'json')
+        self.assertIn('--single', argv)
+        self.assertIn('hello build', argv[argv.index('--single') + 1])
+        self.assertIn('Do not delegate', argv[-1])
+        joined = ' '.join(argv)
+        for bad in ('--trust', '--dangerously-skip-permissions', 'bypassPermissions', 'always-approve', '--yolo', '--force'):
+            self.assertNotIn(bad, joined)
+        envdump = json.loads(env_file.read_text())
+        for k in ('CURSOR_API_KEY', 'OPENAI_API_KEY', 'OPENCODE_CONFIG_CONTENT', 'CUSTOM_TOKEN'):
+            self.assertNotIn(k, envdump)
+
+    def test_grok_build_work_accept_edits(self):
+        ws = make_workspace()
+        stubdir = pathlib.Path(tempfile.mkdtemp(prefix='stub-'))
+        stub = stubdir / 'grok'
+        write_stub(stub, GROK_BUILD_STUB)
+        run_dir = pathlib.Path(tempfile.mkdtemp(prefix='runs-')) / 'run1'
+        argv_file = stubdir / 'argv.json'
+        r = invoke(['--workspace', str(ws), '--provider', 'grok-build', '--mode', 'work',
+                    '--allow-path', 'owned.txt', '--run-dir', str(run_dir), 'do work'],
+                   env_extra={'SUBSCRIPTION_SQUAD_GROK_BUILD_BIN': str(stub),
+                              'STUB_ARGV_FILE': str(argv_file), 'STUB_BEHAVIOR': 'ok'})
+        self.assertEqual(r.returncode, 0, msg=r.stderr.decode()[:2000] + r.stdout.decode()[:2000])
+        argv = json.loads(argv_file.read_text())
+        self.assertEqual(argv[argv.index('--permission-mode') + 1], 'acceptEdits')
+        self.assertIn('owned.txt', argv[-1])
+        receipt = json.loads((run_dir / 'receipt.json').read_text())
+        self.assertEqual(receipt['provider'], 'grok-build')
+        self.assertEqual(receipt['model'], GROK_BUILD)
+        self.assertEqual(receipt['model_requested'], GROK_BUILD)
+        self.assertEqual(receipt['variant'], 'xhigh')
+        self.assertEqual(receipt['effort'], 'xhigh')
+        self.assertEqual(receipt['session_native'], 'ses_gb')
+        # modelUsage is not a scalar model report; only model/modelID/model_id count.
+        self.assertIsNone(receipt['model_reported'])
+        self.assertEqual(receipt['native_meta'].get('modelUsage'), 'grok-4.6-build')
+        self.assertIn('input', json.dumps(receipt.get('usage_native', {})))
+
+    def test_antigravity_ask_argv_env_cwd(self):
+        ws = make_workspace()
+        stubdir = pathlib.Path(tempfile.mkdtemp(prefix='stub-'))
+        stub = stubdir / 'agy'
+        write_stub(stub, ANTIGRAVITY_STUB)
+        run_dir = pathlib.Path(tempfile.mkdtemp(prefix='runs-')) / 'run1'
+        argv_file = stubdir / 'argv.json'
+        env_file = stubdir / 'env.json'
+        cwd_file = stubdir / 'cwd.txt'
+        env = {'SUBSCRIPTION_SQUAD_ANTIGRAVITY_BIN': str(stub), 'STUB_ARGV_FILE': str(argv_file),
+               'STUB_ENV_FILE': str(env_file), 'STUB_CWD_FILE': str(cwd_file),
+               'GEMINI_API_KEY': 'secret', 'OPENAI_API_KEY': 'sk-x', 'STUB_BEHAVIOR': 'ok'}
+        r = invoke(['--workspace', str(ws), '--provider', 'antigravity', '--mode', 'ask',
+                    '--run-dir', str(run_dir), 'hello agy'], env_extra=env)
+        self.assertEqual(r.returncode, 0, msg=r.stderr.decode()[:2000] + r.stdout.decode()[:2000])
+        argv = json.loads(argv_file.read_text())
+        self.assertEqual(argv[argv.index('--model') + 1], AGY)
+        self.assertEqual(argv[argv.index('--effort') + 1], 'high')
+        self.assertEqual(argv[argv.index('--mode') + 1], 'plan')
+        self.assertEqual(argv[argv.index('--output-format') + 1], 'json')
+        self.assertIn('--print-timeout', argv)
+        prints = [a for a in argv if a.startswith('--print=')]
+        self.assertEqual(len(prints), 1)
+        self.assertIn('hello agy', prints[0])
+        self.assertIn('Do not delegate', prints[0])
+        # flags must precede --print=<prompt>
+        self.assertLess(argv.index('--model'), argv.index(prints[0]))
+        self.assertLess(argv.index('--mode'), argv.index(prints[0]))
+        joined = ' '.join(argv)
+        for bad in ('--trust', '--dangerously-skip-permissions', '--disable-slash-commands', 'always-approve', 'bypassPermissions', '--yolo'):
+            self.assertNotIn(bad, joined)
+        self.assertEqual(pathlib.Path(cwd_file).read_text(), str(ws.resolve()))
+        envdump = json.loads(env_file.read_text())
+        self.assertNotIn('GEMINI_API_KEY', envdump)
+        self.assertNotIn('OPENAI_API_KEY', envdump)
+
+    def test_antigravity_work_accept_edits(self):
+        ws = make_workspace()
+        stubdir = pathlib.Path(tempfile.mkdtemp(prefix='stub-'))
+        stub = stubdir / 'agy'
+        write_stub(stub, ANTIGRAVITY_STUB)
+        run_dir = pathlib.Path(tempfile.mkdtemp(prefix='runs-')) / 'run1'
+        argv_file = stubdir / 'argv.json'
+        cwd_file = stubdir / 'cwd.txt'
+        r = invoke(['--workspace', str(ws), '--provider', 'antigravity', '--mode', 'work',
+                    '--allow-path', 'owned.txt', '--run-dir', str(run_dir), 'do work'],
+                   env_extra={'SUBSCRIPTION_SQUAD_ANTIGRAVITY_BIN': str(stub),
+                              'STUB_ARGV_FILE': str(argv_file), 'STUB_CWD_FILE': str(cwd_file),
+                              'STUB_BEHAVIOR': 'ok'})
+        self.assertEqual(r.returncode, 0, msg=r.stderr.decode()[:2000] + r.stdout.decode()[:2000])
+        argv = json.loads(argv_file.read_text())
+        self.assertEqual(argv[argv.index('--mode') + 1], 'accept-edits')
+        prints = [a for a in argv if a.startswith('--print=')]
+        self.assertIn('owned.txt', prints[0])
+        receipt = json.loads((run_dir / 'receipt.json').read_text())
+        self.assertEqual(receipt['provider'], 'antigravity')
+        self.assertEqual(receipt['model'], AGY)
+        self.assertEqual(receipt['variant'], 'high')
+        self.assertEqual(receipt['effort'], 'high')
+        self.assertNotEqual(receipt.get('variant'), 'xhigh')
+        self.assertEqual(receipt['session_native'], 'conv_ok')
+
+    def test_check_grok_build_ok_and_missing(self):
+        ws = make_workspace()
+        stubdir = pathlib.Path(tempfile.mkdtemp(prefix='stub-'))
+        stub = stubdir / 'grok'
+        write_stub(stub, GROK_BUILD_STUB)
+        r = invoke(['--workspace', str(ws), '--provider', 'grok-build', '--check'],
+                   env_extra={'SUBSCRIPTION_SQUAD_GROK_BUILD_BIN': str(stub), 'STUB_INVENTORY_MODE': 'ok'})
+        self.assertEqual(r.returncode, 0, msg=r.stderr.decode()[:1000])
+        self.assertIn('subscription_squad_check=ok', r.stdout.decode())
+        self.assertIn(GROK_BUILD, r.stdout.decode())
+        r2 = invoke(['--workspace', str(ws), '--provider', 'grok-build', '--check'],
+                    env_extra={'SUBSCRIPTION_SQUAD_GROK_BUILD_BIN': str(stub), 'STUB_INVENTORY_MODE': 'missing'})
+        self.assertNotEqual(r2.returncode, 0)
+
+    def test_check_antigravity_ok_and_missing(self):
+        ws = make_workspace()
+        stubdir = pathlib.Path(tempfile.mkdtemp(prefix='stub-'))
+        stub = stubdir / 'agy'
+        write_stub(stub, ANTIGRAVITY_STUB)
+        r = invoke(['--workspace', str(ws), '--provider', 'antigravity', '--check'],
+                   env_extra={'SUBSCRIPTION_SQUAD_ANTIGRAVITY_BIN': str(stub), 'STUB_INVENTORY_MODE': 'ok'})
+        self.assertEqual(r.returncode, 0, msg=r.stderr.decode()[:1000])
+        self.assertIn('subscription_squad_check=ok', r.stdout.decode())
+        self.assertIn(AGY, r.stdout.decode())
+        r2 = invoke(['--workspace', str(ws), '--provider', 'antigravity', '--check'],
+                    env_extra={'SUBSCRIPTION_SQUAD_ANTIGRAVITY_BIN': str(stub), 'STUB_INVENTORY_MODE': 'missing'})
+        self.assertNotEqual(r2.returncode, 0)
+
+    def test_trust_rejected_for_new_providers(self):
+        ws = make_workspace()
+        for prov, key, stubname, stubsrc in (
+                ('grok-build', 'SUBSCRIPTION_SQUAD_GROK_BUILD_BIN', 'grok', GROK_BUILD_STUB),
+                ('antigravity', 'SUBSCRIPTION_SQUAD_ANTIGRAVITY_BIN', 'agy', ANTIGRAVITY_STUB)):
+            stubdir = pathlib.Path(tempfile.mkdtemp(prefix='stub-'))
+            stub = stubdir / stubname
+            write_stub(stub, stubsrc)
+            run_dir = pathlib.Path(tempfile.mkdtemp(prefix='runs-')) / 'run1'
+            r = invoke(['--workspace', str(ws), '--provider', prov, '--trust',
+                        '--run-dir', str(run_dir), 'x'], env_extra={key: str(stub)})
+            self.assertNotEqual(r.returncode, 0, msg=prov)
+
+    def test_steps_rejected_for_new_providers(self):
+        ws = make_workspace()
+        for prov, key, stubname, stubsrc in (
+                ('grok-build', 'SUBSCRIPTION_SQUAD_GROK_BUILD_BIN', 'grok', GROK_BUILD_STUB),
+                ('antigravity', 'SUBSCRIPTION_SQUAD_ANTIGRAVITY_BIN', 'agy', ANTIGRAVITY_STUB)):
+            stubdir = pathlib.Path(tempfile.mkdtemp(prefix='stub-'))
+            stub = stubdir / stubname
+            write_stub(stub, stubsrc)
+            run_dir = pathlib.Path(tempfile.mkdtemp(prefix='runs-')) / 'run1'
+            r = invoke(['--workspace', str(ws), '--provider', prov, '--steps', '45',
+                        '--run-dir', str(run_dir), 'x'], env_extra={key: str(stub)})
+            self.assertNotEqual(r.returncode, 0, msg=prov)
+
+    def test_parse_grok_build_success_and_failures(self):
+        ok = json.dumps({'text': 'hi', 'stopReason': 'stop', 'sessionId': 's1',
+                         'requestId': 'r1', 'usage': {'input': 1}, 'num_turns': 1,
+                         'total_cost_usd': 0.01, 'modelUsage': 'grok-4.6-build'}).encode()
+        text, meta, err = W.parse_grok_build_output(ok)
+        self.assertEqual(text, 'hi')
+        self.assertFalse(err)
+        self.assertEqual(meta['sessionId'], 's1')
+        self.assertEqual(meta['modelUsage'], 'grok-4.6-build')
+        cancelled = json.dumps({'text': 'partial', 'stopReason': 'cancelled', 'sessionId': 's1'}).encode()
+        self.assertTrue(W.parse_grok_build_output(cancelled)[2])
+        self.assertTrue(W.parse_grok_build_output(b'not json')[2])
+        self.assertTrue(W.parse_grok_build_output(json.dumps({'text': '', 'stopReason': 'stop'}).encode())[2])
+        self.assertTrue(W.parse_grok_build_output(json.dumps({'text': 'hi'}).encode())[2])
+        self.assertTrue(W.parse_grok_build_output(json.dumps({'text': 'hi', 'stopReason': 'error'}).encode())[2])
+        self.assertTrue(W.parse_grok_build_output(json.dumps({'text': 'hi', 'error': 'boom'}).encode())[2])
+
+    def test_parse_antigravity_success_and_failures(self):
+        ok = json.dumps({'conversation_id': 'c1', 'status': 'SUCCESS', 'response': 'hi',
+                         'duration_seconds': 1, 'num_turns': 1, 'usage': {'input': 1},
+                         'denied_actions': []}).encode()
+        text, meta, err = W.parse_antigravity_output(ok)
+        self.assertEqual(text, 'hi')
+        self.assertFalse(err)
+        self.assertEqual(meta['conversation_id'], 'c1')
+        empty = json.dumps({'conversation_id': 'c1', 'status': 'SUCCESS', 'response': '',
+                            'denied_actions': []}).encode()
+        self.assertTrue(W.parse_antigravity_output(empty)[2])
+        denied = json.dumps({'conversation_id': 'c1', 'status': 'SUCCESS', 'response': 'hi',
+                             'denied_actions': [{'action': 'edit'}]}).encode()
+        self.assertTrue(W.parse_antigravity_output(denied)[2])
+        failed = json.dumps({'conversation_id': 'c1', 'status': 'FAILED', 'response': 'hi',
+                             'denied_actions': []}).encode()
+        self.assertTrue(W.parse_antigravity_output(failed)[2])
+        self.assertTrue(W.parse_antigravity_output(b'nope')[2])
+
+    def test_grok_build_noisy_prefix_observed_shape(self):
+        final = {'text': 'SQUAD_STATUS: complete\nDone', 'stopReason': 'stop',
+                 'sessionId': 'ses_1', 'requestId': 'req_1', 'thought': 'reasoning',
+                 'usage': {'input': 10}, 'num_turns': 1, 'total_cost_usd': 0.02,
+                 'modelUsage': {'grok-4.6-build': {'input': 10, 'output': 5}}}
+        prefix = '\x1b[33mWARN retrying request\x1b[0m\n\x1b[31mERROR transient upstream\x1b[0m\narbitrary warning line\n'
+        raw = (prefix + json.dumps(final) + '\n').encode()
+        text, meta, err = W.parse_grok_build_output(raw)
+        self.assertFalse(err)
+        self.assertIn('SQUAD_STATUS: complete', text)
+        self.assertEqual(meta['sessionId'], 'ses_1')
+        self.assertEqual(meta['modelUsage'], {'grok-4.6-build': {'input': 10, 'output': 5}})
+        # dict modelUsage must never become model_reported, nor may its key be inferred.
+        self.assertIsNone(W._scalar_model_reported(meta))
+
+    def test_antigravity_noisy_prefix(self):
+        final = {'conversation_id': 'conv_ok', 'status': 'SUCCESS', 'response': 'agy ok',
+                 'duration_seconds': 2, 'num_turns': 1, 'usage': {'input': 7}, 'denied_actions': []}
+        raw = ('\x1b[33mWARN deprecated flag\x1b[0m\nsome warning line\n' + json.dumps(final) + '\n').encode()
+        text, meta, err = W.parse_antigravity_output(raw)
+        self.assertFalse(err)
+        self.assertEqual(text, 'agy ok')
+        self.assertEqual(meta['conversation_id'], 'conv_ok')
+
+    def test_noisy_prefix_terminal_failures_stay_closed(self):
+        prefix = '\x1b[33mWARN noisy\x1b[0m\nnoise line\n'
+        cancelled = {'text': 'partial', 'stopReason': 'cancelled', 'sessionId': 's1',
+                     'requestId': 'r1', 'thought': 't', 'usage': {'input': 1},
+                     'num_turns': 1, 'total_cost_usd': 0.01,
+                     'modelUsage': {'grok-4.6-build': {'input': 1}}}
+        self.assertTrue(W.parse_grok_build_output((prefix + json.dumps(cancelled)).encode())[2])
+        empty = dict(cancelled, text='', stopReason='stop')
+        self.assertTrue(W.parse_grok_build_output((prefix + json.dumps(empty)).encode())[2])
+        errkey = dict(cancelled, stopReason='stop', text='hi', error='boom')
+        self.assertTrue(W.parse_grok_build_output((prefix + json.dumps(errkey)).encode())[2])
+        denied = {'conversation_id': 'c1', 'status': 'SUCCESS', 'response': 'hi',
+                  'duration_seconds': 1, 'num_turns': 1, 'usage': {'input': 1},
+                  'denied_actions': [{'action': 'edit'}]}
+        self.assertTrue(W.parse_antigravity_output((prefix + json.dumps(denied)).encode())[2])
+        empty_agy = dict(denied, response='', denied_actions=[])
+        self.assertTrue(W.parse_antigravity_output((prefix + json.dumps(empty_agy)).encode())[2])
+        failed = dict(denied, denied_actions=[], status='FAILED')
+        self.assertTrue(W.parse_antigravity_output((prefix + json.dumps(failed)).encode())[2])
+
+    def test_terminal_garbage_not_accepted(self):
+        ok_gb = {'text': 'hi', 'stopReason': 'stop', 'sessionId': 's1',
+                 'requestId': 'r1', 'thought': 't', 'usage': {'input': 1},
+                 'num_turns': 1, 'total_cost_usd': 0.01,
+                 'modelUsage': {'grok-4.6-build': {'input': 1}}}
+        ok_agy = {'conversation_id': 'c1', 'status': 'SUCCESS', 'response': 'hi',
+                  'duration_seconds': 1, 'num_turns': 1, 'usage': {'input': 1}, 'denied_actions': []}
+        # Valid earlier JSON followed by non-JSON terminal garbage must fail, not fall back.
+        self.assertTrue(W.parse_grok_build_output((json.dumps(ok_gb) + '\nTRAILING GARBAGE {{{ not json\n').encode())[2])
+        self.assertTrue(W.parse_antigravity_output((json.dumps(ok_agy) + '\nTRAILING GARBAGE {{{ not json\n').encode())[2])
+        # Truncated terminal JSON fails even when an earlier valid object exists.
+        truncated = '{"text": "partial", "stopReason": "stop"'
+        self.assertTrue(W.parse_grok_build_output((json.dumps(ok_gb) + '\n' + truncated).encode())[2])
+        self.assertTrue(W.parse_grok_build_output((truncated).encode())[2])
+        self.assertTrue(W.parse_antigravity_output(b'{"level":"warn","msg":"diag"}\nWARN noise\n')[2])
+        # Diagnostic JSON terminal without provider fields must not validate.
+        self.assertTrue(W.parse_grok_build_output(b'{"level":"warn","msg":"diag"}\n')[2])
+
+    def test_model_reported_scalar_only(self):
+        self.assertIsNone(W._scalar_model_reported({'modelUsage': {'grok-4.6-build': {'input': 1}}}))
+        self.assertIsNone(W._scalar_model_reported({'modelUsage': 'grok-4.6-build'}))
+        self.assertIsNone(W._scalar_model_reported({'model_usage': 'x'}))
+        self.assertIsNone(W._scalar_model_reported({'model': {'nested': 1}}))
+        self.assertIsNone(W._scalar_model_reported({}))
+        self.assertEqual(W._scalar_model_reported({'model': 'grok-4.6'}), 'grok-4.6')
+        self.assertEqual(W._scalar_model_reported({'modelID': 'm1'}), 'm1')
+        self.assertEqual(W._scalar_model_reported({'model_id': 'm2'}), 'm2')
+
+    def test_grok_build_cancelled_exit0_fails(self):
+        ws = make_workspace()
+        stubdir = pathlib.Path(tempfile.mkdtemp(prefix='stub-'))
+        stub = stubdir / 'grok'
+        write_stub(stub, GROK_BUILD_STUB)
+        run_dir = pathlib.Path(tempfile.mkdtemp(prefix='runs-')) / 'run1'
+        r = invoke(['--workspace', str(ws), '--provider', 'grok-build', '--run-dir', str(run_dir), 'hi'],
+                   env_extra={'SUBSCRIPTION_SQUAD_GROK_BUILD_BIN': str(stub), 'STUB_BEHAVIOR': 'cancelled'})
+        self.assertNotEqual(r.returncode, 0)
+        receipt = json.loads((run_dir / 'receipt.json').read_text())
+        self.assertEqual(receipt['status'], 'worker_failed')
+
+    def test_antigravity_denied_and_empty_fail(self):
+        for beh in ('empty_response', 'denied', 'nonsuccess', 'malformed'):
+            with self.subTest(beh=beh):
+                ws = make_workspace()
+                stubdir = pathlib.Path(tempfile.mkdtemp(prefix='stub-'))
+                stub = stubdir / 'agy'
+                write_stub(stub, ANTIGRAVITY_STUB)
+                run_dir = pathlib.Path(tempfile.mkdtemp(prefix='runs-')) / 'run1'
+                r = invoke(['--workspace', str(ws), '--provider', 'antigravity', '--run-dir', str(run_dir), 'hi'],
+                           env_extra={'SUBSCRIPTION_SQUAD_ANTIGRAVITY_BIN': str(stub), 'STUB_BEHAVIOR': beh})
+                self.assertNotEqual(r.returncode, 0, msg=beh)
+                receipt = json.loads((run_dir / 'receipt.json').read_text())
+                self.assertEqual(receipt['status'], 'worker_failed')
+
+    def test_inventory_ok_new_providers(self):
+        self.assertTrue(W.grok_build_inventory_ok('grok-4.6  Grok model\n'))
+        self.assertFalse(W.grok_build_inventory_ok('other-model  Other\n'))
+        self.assertFalse(W.grok_build_inventory_ok('grok-4.6-fast  Other\n'))
+        self.assertTrue(W.antigravity_inventory_ok('gemini-3.8-flash-high  Gemini 3.8 Flash (High)'))
+        self.assertFalse(W.antigravity_inventory_ok('other-model  Other'))
+        self.assertTrue(W.grok_build_inventory_ok(json.dumps({'id': 'grok-4.6'})))
+        self.assertTrue(W.antigravity_inventory_ok(json.dumps({'id': 'gemini-3.8-flash-high'})))
+
+    def test_resolve_env_override_and_fallback(self):
+        with patch.dict(os.environ, {'SUBSCRIPTION_SQUAD_GROK_BUILD_BIN': '/tmp/custom-grok'}):
+            self.assertEqual(W.resolve_grok_build_bin(), '/tmp/custom-grok')
+        with patch.dict(os.environ, {'SUBSCRIPTION_SQUAD_ANTIGRAVITY_BIN': '/tmp/custom-agy'}):
+            self.assertEqual(W.resolve_antigravity_bin(), '/tmp/custom-agy')
+
+    def test_cursor_resolution_prefers_cursor_agent_over_generic_agent(self):
+        def fake_which(name):
+            return {'agent': '/tmp/grok/agent', 'cursor-agent': '/tmp/cursor-agent'}.get(name)
+        with patch.dict(os.environ, {}, clear=True), patch.object(W.shutil, 'which', side_effect=fake_which):
+            self.assertEqual(W.resolve_cursor_bin(), '/tmp/cursor-agent')
+
+    def test_check_includes_resolved_bin_all_providers(self):
+        cases = (
+            ('muse', 'SUBSCRIPTION_SQUAD_OPENCODE_BIN', 'opencode', MUSE_STUB),
+            ('grok', 'SUBSCRIPTION_SQUAD_CURSOR_BIN', 'cursor-agent', CURSOR_STUB),
+            ('grok-build', 'SUBSCRIPTION_SQUAD_GROK_BUILD_BIN', 'grok', GROK_BUILD_STUB),
+            ('antigravity', 'SUBSCRIPTION_SQUAD_ANTIGRAVITY_BIN', 'agy', ANTIGRAVITY_STUB),
+        )
+        for prov, key, stubname, stubsrc in cases:
+            with self.subTest(provider=prov):
+                ws = make_workspace()
+                stubdir = pathlib.Path(tempfile.mkdtemp(prefix='stub-'))
+                stub = stubdir / stubname
+                write_stub(stub, stubsrc)
+                r = invoke(['--workspace', str(ws), '--provider', prov, '--check'],
+                           env_extra={key: str(stub), 'STUB_INVENTORY_MODE': 'ok',
+                                      'CURSOR_API_KEY': 'secret-should-not-leak',
+                                      'OPENAI_API_KEY': 'sk-should-not-leak'})
+                self.assertEqual(r.returncode, 0, msg=r.stderr.decode()[:1000])
+                out = r.stdout.decode()
+                self.assertIn('subscription_squad_check=ok', out)
+                self.assertIn(f'bin={stub}', out)
+                self.assertNotIn('secret-should-not-leak', out)
+                self.assertNotIn('sk-should-not-leak', out)
+
+    def test_receipt_includes_provider_bin_all_providers(self):
+        cases = (
+            ('muse', 'SUBSCRIPTION_SQUAD_OPENCODE_BIN', 'opencode', MUSE_STUB,
+             ['--mode', 'work', '--allow-path', 'owned.txt']),
+            ('grok', 'SUBSCRIPTION_SQUAD_CURSOR_BIN', 'cursor-agent', CURSOR_STUB,
+             ['--mode', 'ask', '--trust']),
+            ('grok-build', 'SUBSCRIPTION_SQUAD_GROK_BUILD_BIN', 'grok', GROK_BUILD_STUB,
+             ['--mode', 'ask']),
+            ('antigravity', 'SUBSCRIPTION_SQUAD_ANTIGRAVITY_BIN', 'agy', ANTIGRAVITY_STUB,
+             ['--mode', 'ask']),
+        )
+        for prov, key, stubname, stubsrc, extra in cases:
+            with self.subTest(provider=prov):
+                ws = make_workspace()
+                stubdir = pathlib.Path(tempfile.mkdtemp(prefix='stub-'))
+                stub = stubdir / stubname
+                write_stub(stub, stubsrc)
+                run_dir = pathlib.Path(tempfile.mkdtemp(prefix='runs-')) / 'run1'
+                r = invoke(['--workspace', str(ws), '--provider', prov,
+                            '--run-dir', str(run_dir), *extra, 'hi'],
+                           env_extra={key: str(stub), 'STUB_BEHAVIOR': 'ok'})
+                self.assertEqual(r.returncode, 0, msg=r.stderr.decode()[:1000] + r.stdout.decode()[:1000])
+                receipt = json.loads((run_dir / 'receipt.json').read_text())
+                self.assertEqual(receipt.get('provider_bin'), str(stub))
+
+    def test_final_prompt_requires_literal_status_line(self):
+        for mode in ('ask', 'work'):
+            owned = [] if mode == 'ask' else [pathlib.Path('owned.txt')]
+            prompt = W.build_final_prompt('do thing', mode, owned)
+            self.assertIn('MUST begin with exactly one of these four complete literal lines', prompt)
+            for label in ('complete', 'partial', 'blocked', 'needs_context'):
+                self.assertIn(f'SQUAD_STATUS: {label}', prompt)
+            self.assertNotIn('First line exactly SQUAD_STATUS: complete, partial', prompt)
+        # Missing status stays unreported; the runner never fabricates it.
+        _, status, _ = W.classify_handoff('hello candidate', 'ask')
+        self.assertEqual(status, 'unreported')
+
+    def test_cursor_resolution_full_order_and_env_override(self):
+        with patch.dict(os.environ, {'SUBSCRIPTION_SQUAD_CURSOR_BIN': '/tmp/env-cursor'}):
+            with patch.object(W.shutil, 'which', return_value='/tmp/other'):
+                self.assertEqual(W.resolve_cursor_bin(), '/tmp/env-cursor')
+        # cursor-agent beats bundled/cursor/generic agent
+        def which_both(name):
+            return {'agent': '/tmp/grok/agent', 'cursor-agent': '/tmp/cursor-agent'}.get(name)
+        with patch.dict(os.environ, {}, clear=True), patch.object(W.shutil, 'which', side_effect=which_both):
+            with patch.object(W.os, 'access', return_value=True):
+                self.assertEqual(W.resolve_cursor_bin(), '/tmp/cursor-agent')
+        # generic agent must not shadow cursor when cursor-agent/bundled are absent
+        def which_cursor_agent(name):
+            return {'cursor': '/tmp/cursor', 'agent': '/tmp/grok/agent'}.get(name)
+        with patch.dict(os.environ, {}, clear=True), patch.object(W.shutil, 'which', side_effect=which_cursor_agent):
+            with patch.object(W.os, 'access', return_value=False):
+                self.assertEqual(W.resolve_cursor_bin(), '/tmp/cursor')
+        # bundled Cursor beats generic agent
+        def which_only_agent(name):
+            return {'agent': '/tmp/grok/agent'}.get(name)
+        with patch.dict(os.environ, {}, clear=True), patch.object(W.shutil, 'which', side_effect=which_only_agent):
+            with patch.object(W.os, 'access', side_effect=lambda p, m: p == '/Applications/Cursor.app/Contents/Resources/app/bin/cursor'):
+                self.assertEqual(W.resolve_cursor_bin(), '/Applications/Cursor.app/Contents/Resources/app/bin/cursor')
+        # generic agent remains the last resort
+        with patch.dict(os.environ, {}, clear=True), patch.object(W.shutil, 'which', side_effect=which_only_agent):
+            with patch.object(W.os, 'access', return_value=False):
+                self.assertEqual(W.resolve_cursor_bin(), '/tmp/grok/agent')
+        # nothing found stays None
+        with patch.dict(os.environ, {}, clear=True), patch.object(W.shutil, 'which', return_value=None):
+            with patch.object(W.os, 'access', return_value=False):
+                self.assertIsNone(W.resolve_cursor_bin())
+        # argv shape follows the resolved binary name
+        self.assertEqual(W.cursor_base_argv('/tmp/cursor-agent'), ['/tmp/cursor-agent'])
+        self.assertEqual(W.cursor_base_argv('/tmp/grok/agent'), ['/tmp/grok/agent'])
+        self.assertEqual(W.cursor_base_argv('/tmp/cursor'), ['/tmp/cursor', 'agent'])
+
+    def test_legacy_muse_grok_regression(self):
+        self.assertEqual(W.GROK_MODEL, 'cursor-grok-4.6-xhigh')
+        self.assertEqual(W.MUSE_MODEL, 'opencode-go/muse-spark-1.3-contributor')
+        # legacy grok stays ask-only; trust stays cursor-only; steps stays muse-only
+        ws = make_workspace()
+        stubdir = pathlib.Path(tempfile.mkdtemp(prefix='stub-'))
+        stub = stubdir / 'cursor-agent'
+        write_stub(stub, CURSOR_STUB)
+        run_dir = pathlib.Path(tempfile.mkdtemp(prefix='runs-')) / 'run1'
+        r = invoke(['--workspace', str(ws), '--provider', 'grok', '--mode', 'work',
+                    '--allow-path', 'owned.txt', '--run-dir', str(run_dir), 'x'],
+                   env_extra={'SUBSCRIPTION_SQUAD_CURSOR_BIN': str(stub)})
+        self.assertNotEqual(r.returncode, 0)
 
 
 if __name__ == '__main__':

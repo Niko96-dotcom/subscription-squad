@@ -5,7 +5,7 @@ Short version: keep changes scoped, run the gate, never paste secrets.
 ## Prerequisites
 
 - POSIX macOS or Linux, Git, Python 3.10+ (standard library only, no installs).
-- Existing OpenCode and Cursor logins if you exercise live provider runs.
+- Existing OpenCode, Cursor, Grok Build, and Antigravity logins if you exercise live provider runs.
   Unit tests never call providers; they use local stubs only.
 
 ## Test commands

@@ -20,6 +20,8 @@ RUNS="/ABSOLUTE/task-runs"
 #    not a quota guarantee.
 python3 "$SKILL/scripts/worker.py" --provider muse --check
 python3 "$SKILL/scripts/worker.py" --provider grok --check
+python3 "$SKILL/scripts/worker.py" --provider grok-build --check
+python3 "$SKILL/scripts/worker.py" --provider antigravity --check
 
 # 2. Implementation (Muse via OpenCode, owned paths only).
 #    --allow-path repeats; each entry is a literal workspace-relative file
@@ -36,6 +38,27 @@ python3 "$SKILL/scripts/worker.py" --provider muse --mode work \
 python3 "$SKILL/scripts/worker.py" --provider grok --mode ask \
   --workspace "$CHECKOUT" --trust \
   --prompt-file "$PROMPTS/review.txt" --run-dir "$RUNS/review-1" --timeout 600
+
+# 3b. Native review alternatives (read-only ask uses plan; no --trust).
+#     Grok Build uses fixed xhigh reasoning; Antigravity uses fixed high
+#     effort with gemini-3.8-flash-high (receipts record high, not xhigh).
+python3 "$SKILL/scripts/worker.py" --provider grok-build --mode ask \
+  --workspace "$CHECKOUT" \
+  --prompt-file "$PROMPTS/review.txt" --run-dir "$RUNS/review-gb-1" --timeout 600
+python3 "$SKILL/scripts/worker.py" --provider antigravity --mode ask \
+  --workspace "$CHECKOUT" \
+  --prompt-file "$PROMPTS/review.txt" --run-dir "$RUNS/review-agy-1" --timeout 600
+
+# 3c. Native work alternatives (bounded edits only; ask stays read-only).
+#     Grok Build work uses --permission-mode acceptEdits; Antigravity work
+#     uses --mode accept-edits. Never add always-approve, bypass, dangerous
+#     skip, yolo, or force flags.
+python3 "$SKILL/scripts/worker.py" --provider grok-build --mode work \
+  --workspace "$CHECKOUT" --allow-path src/owned_file.py \
+  --prompt-file "$PROMPTS/brief.txt" --run-dir "$RUNS/work-gb-1" --timeout 900
+python3 "$SKILL/scripts/worker.py" --provider antigravity --mode work \
+  --workspace "$CHECKOUT" --allow-path src/owned_file.py \
+  --prompt-file "$PROMPTS/brief.txt" --run-dir "$RUNS/work-agy-1" --timeout 900
 
 # 4. Collect sibling runs without ingesting transcripts.
 #    The state file must live outside every run directory. At most two new

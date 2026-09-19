@@ -7,9 +7,10 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](Makefile)
 
 Keep Codex as a lean coordinator. Delegate bounded implementation to
-Muse Spark 1.3 Contributor via OpenCode Go, and independent review to
-Grok 4.6 via Cursor — using logins and subscriptions you already have.
-No new accounts, no billing changes, no permission expansion.
+Muse Spark 1.3 Contributor via OpenCode Go, Grok 4.6 via native Grok Build,
+or Gemini 3.8 Flash via Antigravity — and independent review to Grok 4.6
+via Cursor (legacy) or the native routes — using logins and subscriptions
+you already have. No new accounts, no billing changes, no permission expansion.
 
 ```bash
 git clone https://github.com/Niko96-dotcom/subscription-squad.git
@@ -24,8 +25,10 @@ authoritative for flags. This README is only the landing page.
 ## Requirements
 
 macOS or Linux, Python 3.10+, and Git. Live workers also need the OpenCode
-CLI logged in to OpenCode Go and the Cursor CLI logged in with access to
-the exact models above. Tests need neither provider nor login. Run both
+CLI logged in to OpenCode Go, the Cursor CLI logged in with access to
+the exact models above, the Grok Build CLI (`grok`) logged in with access
+to `grok-4.6`, and the Antigravity CLI (`agy`) logged in with access to
+`gemini-3.8-flash-high`. Tests need neither provider nor login. Run all
 `--check` commands below: model availability and subscription quotas can change.
 
 ## Install the skill for Codex
@@ -62,11 +65,13 @@ and brief/collect rules.
 All prompts live outside the target checkout. Every `--run-dir` is fresh
 (must not exist yet) and outside the checkout.
 
-**1. Check both routes** (inventory behind your existing logins):
+**1. Check all routes** (inventory behind your existing logins):
 
 ```bash
 python3 scripts/worker.py --provider muse --check
 python3 scripts/worker.py --provider grok --check
+python3 scripts/worker.py --provider grok-build --check
+python3 scripts/worker.py --provider antigravity --check
 ```
 
 **2. Implement with Muse** (owned paths only):
@@ -77,12 +82,34 @@ python3 scripts/worker.py --provider muse --mode work \
   --prompt-file /ABSOLUTE/prompts/brief.txt --run-dir /ABSOLUTE/task-runs/work-1 --timeout 900
 ```
 
-**3. Review with Grok** (read-only; no `--allow-path`):
+Native alternatives (subscription/account-backed; fixed effort recorded truthfully in receipts):
+
+```bash
+python3 scripts/worker.py --provider grok-build --mode work \
+  --workspace /ABSOLUTE/checkout --allow-path src/owned_file.py \
+  --prompt-file /ABSOLUTE/prompts/brief.txt --run-dir /ABSOLUTE/task-runs/work-gb-1 --timeout 900
+python3 scripts/worker.py --provider antigravity --mode work \
+  --workspace /ABSOLUTE/checkout --allow-path src/owned_file.py \
+  --prompt-file /ABSOLUTE/prompts/brief.txt --run-dir /ABSOLUTE/task-runs/work-agy-1 --timeout 900
+```
+
+**3. Review with Grok** (legacy Cursor, read-only; no `--allow-path`):
 
 ```bash
 python3 scripts/worker.py --provider grok --mode ask \
   --workspace /ABSOLUTE/checkout --trust \
   --prompt-file /ABSOLUTE/prompts/review.txt --run-dir /ABSOLUTE/task-runs/review-1 --timeout 600
+```
+
+Native review alternatives (read-only ask uses `plan`; no `--trust`):
+
+```bash
+python3 scripts/worker.py --provider grok-build --mode ask \
+  --workspace /ABSOLUTE/checkout \
+  --prompt-file /ABSOLUTE/prompts/review.txt --run-dir /ABSOLUTE/task-runs/review-gb-1 --timeout 600
+python3 scripts/worker.py --provider antigravity --mode ask \
+  --workspace /ABSOLUTE/checkout \
+  --prompt-file /ABSOLUTE/prompts/review.txt --run-dir /ABSOLUTE/task-runs/review-agy-1 --timeout 600
 ```
 
 Pass `--trust` only for an already authorized/trusted workspace or a
@@ -111,8 +138,9 @@ Full flag details: `python3 scripts/worker.py --help`,
   private data from the checkout before delegating. See [SKILL.md](SKILL.md).
 - **Small packages, bounded calls.** Default: 1 implementation + 1
   cross-model review, max 2 concurrent workers in separate workspaces,
-  6 calls per task, 900 s per call, 60 model steps. Details in
-  [SKILL.md](SKILL.md).
+  6 calls per task, 900 s per call, 60 model steps (Muse-only). Grok Build
+  uses fixed `xhigh` reasoning; Antigravity uses fixed `high` effort with
+  `gemini-3.8-flash-high`. Details in [SKILL.md](SKILL.md).
 - **Privacy is about inputs.** Muse Contributor is marked
   training-enabled without zero data retention: do not send secrets,
   private personal records, or excluded code as input down that route.
@@ -132,10 +160,15 @@ Full flag details: `python3 scripts/worker.py --help`,
   non-ignored files plus the index and `HEAD`; ignored and external files
   are not covered. Tool permissions and manifests do not isolate processes like an OS
   sandbox. Fresh `--run-dir` directories are created mode `0700`, but treat transcripts
-  as sensitive anyway. Coordinator checks decide acceptance.
+  as sensitive anyway. Coordinator checks decide acceptance. Receipts record
+  provider, requested model, and actual effort/variant truthfully (`high`, not
+  `xhigh`, for Antigravity); reported `modelUsage`/session metadata is preserved
+  without claiming it is independent attestation of hidden reasoning.
 - **Billing unchanged.** Existing auth only; the runner never enables
   overage or changes credentials, but provider-side overage settings can
-  still bill. See [references/routes.md](references/routes.md).
+  still bill. Native Grok Build and Antigravity routes are
+  subscription/account-backed, with no CLI-only promise of zero overage.
+  See [references/routes.md](references/routes.md).
 
 ## Tests and CI
 

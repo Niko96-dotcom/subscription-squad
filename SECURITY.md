@@ -19,9 +19,10 @@ A minimal reproduction with redacted paths is enough to start.
   `--run-dir` must be separate directories; the runner refuses nested or
   reused run dirs. Collector state must live outside every run directory.
 - **Provider CLIs.** `scripts/worker.py` shells out to your installed
-  `opencode` and Cursor (`agent`/`cursor-agent`) binaries under your existing
-  logins. Binary overrides exist only as
-  `SUBSCRIPTION_SQUAD_OPENCODE_BIN` / `SUBSCRIPTION_SQUAD_CURSOR_BIN`.
+  `opencode`, Cursor (`agent`/`cursor-agent`), Grok Build (`grok`), and
+  Antigravity (`agy`) binaries under your existing logins. Binary overrides exist only as
+  `SUBSCRIPTION_SQUAD_OPENCODE_BIN` / `SUBSCRIPTION_SQUAD_CURSOR_BIN` /
+  `SUBSCRIPTION_SQUAD_GROK_BUILD_BIN` / `SUBSCRIPTION_SQUAD_ANTIGRAVITY_BIN`.
   The runner does not inspect credentials; the installed CLIs use on-disk login
   plus the inherited environment subject to filtering below.
 - **One worker per workspace.** A filesystem lock serializes workers on the
@@ -44,9 +45,15 @@ A minimal reproduction with redacted paths is enough to start.
 - `--allow-path` takes only literal workspace-relative files or directories:
   no globs, no absolute paths, no `..`, no `.git` internals.
 - `--trust` applies only to the Grok (Cursor) route and only for a workspace
-  that is already authorized/trusted or a fixture you created. Never add
+  that is already authorized/trusted or a fixture you created. It is rejected
+  for Muse, Grok Build, and Antigravity. `--steps` is Muse-only. Never add
   force/yolo flags to bypass a denied action. Grok runs ask-only and cannot
-  take `--allow-path`.
+  take `--allow-path`. Grok Build ask uses `--permission-mode plan` and work
+  uses only `acceptEdits`; Antigravity ask uses `--mode plan` and work uses
+  only `accept-edits`. Never use always-approve, bypassPermissions, dangerous
+  skip (`--dangerously-skip-permissions`), yolo, force, or equivalent. Do not
+  add `--disable-slash-commands` to Antigravity: the live CLI warns it makes
+  `--mode plan` ineffective.
 - Out-of-scope content edits, any index change, or a `HEAD` move marks the
   run `scope_violation` (exit 3). The coordinator re-verifies with its own
   checks; it does not trust worker output alone.
@@ -72,7 +79,13 @@ never reads `output.log`.
 - Muse Contributor is marked training-enabled without zero data
   retention; do not send secrets, private personal records, or excluded
   code as input down that route. Provider-side overage settings can still bill;
-  the runner never changes billing or credentials.
+  the runner never changes billing or credentials. Grok Build and Antigravity
+  are subscription/account-backed native routes with the same caveat: no
+  CLI-only promise of zero overage. Empty responses, error/cancelled/non-success
+  terminal states, malformed JSON, and any Antigravity `denied_actions` are
+  treated as failures even on exit 0. Reported model/effort metadata
+  (`modelUsage`, session/conversation IDs, usage) is preserved evidence only,
+  not independent attestation of hidden reasoning or quality.
 
 ## Tests and CI
 

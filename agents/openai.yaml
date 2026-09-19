@@ -1,4 +1,4 @@
 interface:
   display_name: "Subscription Squad"
-  short_description: "Muse implementation and Grok review, led by Codex"
-  default_prompt: "Use $subscription-squad to complete this task using my existing OpenCode and Cursor subscriptions while minimizing Codex usage."
+  short_description: "External workers plus review, led by Codex"
+  default_prompt: "Use $subscription-squad for this task, where Codex coordinates and accepts while substantive work dispatches at least one bounded external worker."

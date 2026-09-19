@@ -16,7 +16,9 @@ required). You have no tools in this packet; if bounded read-only
 investigation is truly needed, say exactly which files and why.
 
 Notes for the coordinator (not the worker): run this with
---provider grok --mode ask (read-only, no --allow-path). Add --trust only
-for an already authorized/trusted workspace or a fixture you created.
-Keep the packet self-contained; the runner appends the fixed review
+--provider grok --mode ask (legacy Cursor, read-only, no --allow-path) and
+add --trust only for an already authorized/trusted workspace or a fixture
+you created; or with --provider grok-build --mode ask or
+--provider antigravity --mode ask (native subscription routes, read-only
+plan, no --trust). Keep the packet self-contained; the runner appends the fixed review
 instructions and the SQUAD_STATUS handoff requirement automatically.

@@ -20,6 +20,10 @@ from datetime import datetime, timezone
 MUSE_MODEL = "opencode-go/muse-spark-1.3-contributor"
 MUSE_VARIANT = "xhigh"
 GROK_MODEL = "cursor-grok-4.6-xhigh"
+GROK_BUILD_MODEL = "grok-4.6"
+GROK_BUILD_EFFORT = "xhigh"
+ANTIGRAVITY_MODEL = "gemini-3.8-flash-high"
+ANTIGRAVITY_EFFORT = "high"
 
 # Exact inherited overrides/credentials filtered from provider subprocesses.
 # Suffixes cover additional *_TOKEN / *_SECRET / *_API_KEY style credentials.
@@ -151,14 +155,45 @@ def resolve_cursor_bin():
     env = os.environ.get('SUBSCRIPTION_SQUAD_CURSOR_BIN')
     if env:
         return env
-    for name in ('agent', 'cursor-agent'):
-        found = shutil.which(name)
-        if found:
-            return found
+    # Prefer Cursor's unambiguous binary name. Grok Build also installs a
+    # generic `agent` executable, so choosing `agent` first can silently query
+    # the wrong provider inventory.
+    found = shutil.which('cursor-agent')
+    if found:
+        return found
     bundled = '/Applications/Cursor.app/Contents/Resources/app/bin/cursor'
     if os.access(bundled, os.X_OK):
         return bundled
-    return shutil.which('cursor')
+    found = shutil.which('cursor')
+    if found:
+        return found
+    return shutil.which('agent')
+
+
+def resolve_grok_build_bin():
+    env = os.environ.get('SUBSCRIPTION_SQUAD_GROK_BUILD_BIN')
+    if env:
+        return env
+    found = shutil.which('grok')
+    if found:
+        return found
+    cand = os.path.expanduser('~/.grok/bin/grok')
+    if os.access(cand, os.X_OK):
+        return cand
+    return None
+
+
+def resolve_antigravity_bin():
+    env = os.environ.get('SUBSCRIPTION_SQUAD_ANTIGRAVITY_BIN')
+    if env:
+        return env
+    found = shutil.which('agy')
+    if found:
+        return found
+    cand = os.path.expanduser('~/.local/bin/agy')
+    if os.access(cand, os.X_OK):
+        return cand
+    return None
 
 
 def cursor_base_argv(cursor_bin):
@@ -189,6 +224,47 @@ def extract_json_objects(text):
     return objs
 
 
+_ANSI_RE = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
+
+
+def _terminal_json_dict(data):
+    """Return the final top-level JSON dict that runs to end of stream.
+
+    Noisy WARN/ERROR (possibly ANSI-colored) prefixes are ignored, but the
+    candidate must extend to end-of-stream modulo whitespace/ANSI. This fails
+    closed: an earlier valid JSON followed by non-JSON terminal garbage yields
+    None instead of the earlier object.
+    """
+    text = data.decode(errors='replace') if isinstance(data, bytes) else data
+    dec = json.JSONDecoder()
+    starts = []
+    pos = text.find('{')
+    while pos != -1:
+        starts.append(pos)
+        pos = text.find('{', pos + 1)
+    for start in reversed(starts):
+        try:
+            obj, end = dec.raw_decode(text[start:])
+        except json.JSONDecodeError:
+            continue
+        tail = text[start + end:]
+        if _ANSI_RE.sub('', tail).strip() != '':
+            continue
+        if isinstance(obj, dict):
+            return obj
+        return None
+    return None
+
+
+def _scalar_model_reported(meta):
+    """Only an explicit scalar model/modelID/model_id counts; never modelUsage."""
+    for key in ('model', 'modelID', 'model_id'):
+        value = meta.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
 def muse_inventory_ok(text):
     return any(isinstance(item, dict)
                and item.get('id') == 'muse-spark-1.3-contributor'
@@ -202,6 +278,32 @@ def grok_inventory_ok(text):
     for line in text.splitlines():
         parts = line.split()
         if parts and parts[0] == GROK_MODEL:
+            return True
+    return False
+
+
+def grok_build_inventory_ok(text):
+    for item in extract_json_objects(text):
+        if isinstance(item, dict) and item.get('id') == GROK_BUILD_MODEL:
+            return True
+    for line in text.splitlines():
+        parts = line.split()
+        if parts and parts[0] == GROK_BUILD_MODEL:
+            return True
+    for tok in re.split(r'[\s,;|]+', text):
+        if tok.strip('"\'`') == GROK_BUILD_MODEL:
+            return True
+    return False
+
+
+def antigravity_inventory_ok(text):
+    for item in extract_json_objects(text):
+        if isinstance(item, dict) and item.get('id') == ANTIGRAVITY_MODEL:
+            return True
+        if isinstance(item, dict) and item.get('model') == ANTIGRAVITY_MODEL:
+            return True
+    for tok in re.split(r'[\s,;|]+', text):
+        if tok.strip('"\'`') == ANTIGRAVITY_MODEL:
             return True
     return False
 
@@ -255,7 +357,7 @@ def build_final_prompt(user_prompt, mode, owned):
         allowed = ', '.join(str(p) for p in owned)
         lines.append(f'Allowed paths: {allowed}. Only these owned files or dirs may change; do not modify any other content.')
     lines.append('You are not alone: preserve pre-existing and other workers edits. Batch relevant reads; make only the requested change. Do not expand the architecture or change acceptance criteria.')
-    lines.append('Finish with a concise handoff in <=500 words. First line exactly SQUAD_STATUS: complete, partial, blocked, or needs_context. Complete means the assigned edits or analysis are delivered, not independently accepted. Then list changed files, checks actually run, remaining work, risks, and exact next action. If tools or steps run out, report partial and list unfinished requirements. Do not invent test results.')
+    lines.append('Finish with a concise handoff in <=500 words. Your response MUST begin with exactly one of these four complete literal lines and nothing else on that line: `SQUAD_STATUS: complete`, `SQUAD_STATUS: partial`, `SQUAD_STATUS: blocked`, `SQUAD_STATUS: needs_context`. Complete means the assigned edits or analysis are delivered, not independently accepted. Then list changed files, checks actually run, remaining work, risks, and exact next action. If tools or steps run out, report partial and list unfinished requirements. Do not invent test results.')
     return '\n'.join(lines)
 
 
@@ -312,6 +414,58 @@ def parse_grok_output(data):
     return result.strip(), meta, bool(obj.get('is_error') or obj.get('error') or obj.get('subtype') != 'success' or not result.strip())
 
 
+def parse_grok_build_output(data):
+    obj = _terminal_json_dict(data)
+    if not isinstance(obj, dict):
+        return '', {}, True
+    meta = {k: obj[k] for k in ('text', 'stopReason', 'sessionId', 'requestId', 'thought',
+                                'usage', 'num_turns', 'total_cost_usd', 'modelUsage',
+                                'model', 'session_id', 'request_id') if k in obj}
+    if obj.get('error') or obj.get('is_error') or obj.get('errors'):
+        return '', meta, True
+    result = obj.get('text', '')
+    if not isinstance(result, str):
+        result = ''
+    result = result.strip()
+    if not result:
+        return '', meta, True
+    stop = obj.get('stopReason')
+    if stop is None:
+        return '', meta, True
+    norm = str(stop).strip().lower()
+    if norm not in ('stop', 'end_turn', 'completed', 'complete', 'success', 'done', 'finished', 'stop_sequence', 'end', 'ok'):
+        return '', meta, True
+    return result, meta, False
+
+
+def parse_antigravity_output(data):
+    obj = _terminal_json_dict(data)
+    if not isinstance(obj, dict):
+        return '', {}, True
+    meta = {k: obj[k] for k in ('conversation_id', 'status', 'response', 'duration_seconds',
+                                'num_turns', 'usage', 'denied_actions',
+                                'conversationId', 'sessionId') if k in obj}
+    if obj.get('error') or obj.get('is_error') or obj.get('errors'):
+        return '', meta, True
+    status = obj.get('status')
+    if status is None or str(status).strip().lower() not in ('success', 'ok', 'completed', 'complete', 'done'):
+        return '', meta, True
+    denied = obj.get('denied_actions')
+    if denied:
+        if isinstance(denied, (list, dict, str)):
+            if len(denied) > 0:
+                return '', meta, True
+        elif denied:
+            return '', meta, True
+    result = obj.get('response', '')
+    if not isinstance(result, str):
+        result = ''
+    result = result.strip()
+    if not result:
+        return '', meta, True
+    return result, meta, False
+
+
 def classify_handoff(text, mode, step_count=0, step_budget=None):
     """Transport success is separate from worker-reported delivery and acceptance."""
     matches = list(re.finditer(r'^SQUAD_STATUS: (complete|partial|blocked|needs_context)[ \t]*$', text, re.M))
@@ -335,7 +489,7 @@ def lock_path_for(workspace):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--workspace', type=Path, default=Path.cwd())
-    parser.add_argument('--provider', choices=['muse', 'grok'], required=True)
+    parser.add_argument('--provider', choices=['muse', 'grok', 'grok-build', 'antigravity'], required=True)
     parser.add_argument('--variant', default='xhigh')
     parser.add_argument('--steps', type=int, default=None, help='Muse model-step budget: 5..120; default 60; split broad work before increasing')
     parser.add_argument('--mode', choices=['ask', 'work'], default='ask')
@@ -364,8 +518,23 @@ def main(argv=None):
     if not workspace.is_dir():
         parser.error('workspace must be a directory')
     provider = args.provider
-    model_requested = MUSE_MODEL if provider == 'muse' else GROK_MODEL
-    if provider == 'muse' and args.trust:
+    if provider == 'muse':
+        model_requested = MUSE_MODEL
+        provider_variant = MUSE_VARIANT
+        provider_effort = 'xhigh'
+    elif provider == 'grok':
+        model_requested = GROK_MODEL
+        provider_variant = 'xhigh'
+        provider_effort = 'xhigh'
+    elif provider == 'grok-build':
+        model_requested = GROK_BUILD_MODEL
+        provider_variant = 'xhigh'
+        provider_effort = GROK_BUILD_EFFORT
+    else:
+        model_requested = ANTIGRAVITY_MODEL
+        provider_variant = ANTIGRAVITY_EFFORT
+        provider_effort = ANTIGRAVITY_EFFORT
+    if provider != 'grok' and args.trust:
         parser.error('--trust applies only to grok (Cursor) provider')
     if provider == 'grok' and args.mode == 'work':
         parser.error('grok provider supports ask mode only; implementation belongs to Muse')
@@ -379,10 +548,12 @@ def main(argv=None):
             raw = preflight([opencode_bin, 'models', 'opencode-go', '--verbose'], min(args.timeout, 30), env=check_env)
             if not muse_inventory_ok(raw):
                 raise ValueError(f'exact Muse model variant is not available: {MUSE_MODEL} variant {MUSE_VARIANT}')
-            print(f'subscription_squad_check=ok provider=muse model={MUSE_MODEL} variant={MUSE_VARIANT}')
+            print(f'subscription_squad_check=ok provider=muse model={MUSE_MODEL} variant={MUSE_VARIANT} bin={opencode_bin}')
             return 0
         cursor_bin = None
-    else:
+        grok_build_bin = None
+        agy_bin = None
+    elif provider == 'grok':
         cursor_bin = resolve_cursor_bin()
         if not cursor_bin or not os.access(cursor_bin, os.X_OK):
             parser.error('Cursor CLI (agent or cursor-agent) not found or not executable')
@@ -390,9 +561,37 @@ def main(argv=None):
             raw = preflight(cursor_base_argv(cursor_bin) + ['models'], min(args.timeout, 30))
             if not grok_inventory_ok(raw):
                 raise ValueError(f'exact Grok model ID is not available: {GROK_MODEL}')
-            print(f'subscription_squad_check=ok provider=grok model={GROK_MODEL}')
+            print(f'subscription_squad_check=ok provider=grok model={GROK_MODEL} bin={cursor_bin}')
             return 0
         opencode_bin = None
+        grok_build_bin = None
+        agy_bin = None
+    elif provider == 'grok-build':
+        grok_build_bin = resolve_grok_build_bin()
+        if not grok_build_bin or not os.access(grok_build_bin, os.X_OK):
+            parser.error('Grok Build CLI (grok) not found or not executable')
+        if args.check:
+            raw = preflight([grok_build_bin, 'models'], min(args.timeout, 30))
+            if not grok_build_inventory_ok(raw):
+                raise ValueError(f'exact Grok Build model ID is not available: {GROK_BUILD_MODEL}')
+            print(f'subscription_squad_check=ok provider=grok-build model={GROK_BUILD_MODEL} reasoning-effort={GROK_BUILD_EFFORT} bin={grok_build_bin}')
+            return 0
+        opencode_bin = None
+        cursor_bin = None
+        agy_bin = None
+    else:
+        agy_bin = resolve_antigravity_bin()
+        if not agy_bin or not os.access(agy_bin, os.X_OK):
+            parser.error('Antigravity CLI (agy) not found or not executable')
+        if args.check:
+            raw = preflight([agy_bin, 'models'], min(args.timeout, 30))
+            if not antigravity_inventory_ok(raw):
+                raise ValueError(f'exact Antigravity model ID is not available: {ANTIGRAVITY_MODEL}')
+            print(f'subscription_squad_check=ok provider=antigravity model={ANTIGRAVITY_MODEL} effort={ANTIGRAVITY_EFFORT} bin={agy_bin}')
+            return 0
+        opencode_bin = None
+        cursor_bin = None
+        grok_build_bin = None
     root_check = git(workspace, 'rev-parse', '--show-toplevel')
     if root_check.returncode or Path(os.fsdecode(root_check.stdout).strip()).resolve() != workspace:
         parser.error('--workspace must be the Git checkout root')
@@ -451,9 +650,13 @@ def main(argv=None):
         atomic_json(run/'before.json', before)
         status_before = digest(git(workspace, 'status', '--porcelain=v1', '-z').stdout)
         head_before = git(workspace, 'rev-parse', 'HEAD').stdout.decode().strip()
+        provider_bin = {'muse': opencode_bin, 'grok': cursor_bin,
+                        'grok-build': grok_build_bin, 'antigravity': agy_bin}[provider]
         receipt = {'schema': 'subscription-squad-worker-run/v1', 'run_id': args.run_id or run.name,
-                   'workspace': str(workspace), 'provider': provider, 'model': model_requested,
-                   'model_requested': model_requested, 'variant': 'xhigh', 'mode': args.mode,
+                   'workspace': str(workspace), 'provider': provider, 'provider_bin': provider_bin,
+                   'model': model_requested,
+                   'model_requested': model_requested, 'variant': provider_variant, 'effort': provider_effort,
+                   'mode': args.mode,
                    'prompt_sha256': digest(build_final_prompt(prompt, args.mode, owned).encode()), 'started_at_utc': now(),
                    'owned_paths': [str(p) for p in owned], 'timeout_seconds': args.timeout, 'step_budget': step_budget if provider == 'muse' else None,
                    'trust': args.trust, 'status': 'running', 'git_status_before_sha256': status_before,
@@ -465,7 +668,8 @@ def main(argv=None):
                        '--variant', 'xhigh', '--format', 'json', '--agent', 'squad-worker', final_prompt]
             child_env = sanitized_provider_env()
             child_env['OPENCODE_CONFIG_CONTENT'] = json.dumps(build_opencode_config(args.mode, owned, step_budget))
-        else:
+            child_cwd = None
+        elif provider == 'grok':
             command = cursor_base_argv(cursor_bin) + ['--print', '--output-format', 'json', '--workspace', str(workspace), '--model', GROK_MODEL]
             if args.trust:
                 command.append('--trust')
@@ -473,6 +677,23 @@ def main(argv=None):
                 command += ['--mode', 'ask']
             command.append(final_prompt)
             child_env = sanitized_provider_env()
+            child_cwd = None
+        elif provider == 'grok-build':
+            perm_mode = 'plan' if args.mode == 'ask' else 'acceptEdits'
+            command = [grok_build_bin, '--cwd', str(workspace), '--model', GROK_BUILD_MODEL,
+                       '--reasoning-effort', GROK_BUILD_EFFORT, '--permission-mode', perm_mode,
+                       '--no-subagents', '--disable-web-search', '--output-format', 'json',
+                       '--single', final_prompt]
+            child_env = sanitized_provider_env()
+            child_cwd = None
+        else:
+            agy_mode = 'plan' if args.mode == 'ask' else 'accept-edits'
+            print_timeout = f'{int(args.timeout)}s'
+            command = [agy_bin, '--output-format', 'json', '--model', ANTIGRAVITY_MODEL,
+                       '--effort', ANTIGRAVITY_EFFORT, '--mode', agy_mode,
+                       '--print-timeout', print_timeout, f'--print={final_prompt}']
+            child_env = sanitized_provider_env()
+            child_cwd = str(workspace)
         process = None
         started = time.monotonic()
         code = 1
@@ -480,7 +701,8 @@ def main(argv=None):
         try:
             with (run/'output.log').open('wb') as output:
                 process = subprocess.Popen(command, stdout=output, stderr=subprocess.STDOUT,
-                                           stdin=subprocess.DEVNULL, start_new_session=True, env=child_env)
+                                           stdin=subprocess.DEVNULL, start_new_session=True, env=child_env,
+                                           cwd=child_cwd)
                 receipt['pid'] = process.pid
                 atomic_json(run/'receipt.json', receipt)
                 try:
@@ -528,13 +750,18 @@ def main(argv=None):
                 raw_out = (run/'output.log').read_bytes() if (run/'output.log').exists() else b''
                 if provider == 'muse':
                     result_text, native_meta, saw_error = parse_muse_output(raw_out)
-                else:
+                elif provider == 'grok':
                     result_text, native_meta, saw_error = parse_grok_output(raw_out)
+                elif provider == 'grok-build':
+                    result_text, native_meta, saw_error = parse_grok_build_output(raw_out)
+                else:
+                    result_text, native_meta, saw_error = parse_antigravity_output(raw_out)
                 result_text, work_status, step_limit_reached = classify_handoff(result_text, args.mode, native_meta.get('step_count', 0), step_budget if provider == 'muse' else None)
                 receipt.update(work_status=work_status, step_count=native_meta.get('step_count'), step_limit_reached=step_limit_reached)
                 (run/'result.txt').write_text(result_text + ('' if (not result_text or result_text.endswith('\n')) else '\n'))
-                model_reported = native_meta.get('model') or native_meta.get('modelID') or native_meta.get('model_id')
-                session_native = native_meta.get('sessionID') or native_meta.get('session_id') or native_meta.get('sessionId') or native_meta.get('session')
+                model_reported = _scalar_model_reported(native_meta)
+                session_native = (native_meta.get('sessionID') or native_meta.get('session_id') or native_meta.get('sessionId')
+                                  or native_meta.get('session') or native_meta.get('conversation_id') or native_meta.get('conversationId'))
                 usage_native = native_meta.get('usage') or native_meta.get('tokens') or native_meta.get('cost')
                 # Record native metadata only when present; never fabricate.
                 if model_reported is not None:
