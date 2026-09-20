@@ -17,7 +17,7 @@ Before dispatching research workers, freeze one bounded packet containing:
 - the relevant excerpts, data, or version facts per source;
 - open questions or contradictions the workers must address.
 
-Keep the packet bounded but self-contained: include the excerpts a worker needs so it never has to fetch. Never omit required context to make a packet shorter.
+Keep the packet bounded but self-contained: include the excerpts a worker needs so it never has to fetch. Never omit required context to make a packet shorter. Before dispatch, confirm the packet is accessible from the worker workspace: embed excerpts and data directly and do not rely on outside files, file tools, or live retrieval.
 
 ## Worker dispatch
 
