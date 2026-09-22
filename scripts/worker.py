@@ -19,8 +19,8 @@ from datetime import datetime, timezone
 
 MUSE_MODEL = "opencode-go/muse-spark-1.3-contributor"
 MUSE_VARIANT = "xhigh"
-GROK_MODEL = "cursor-grok-4.6-xhigh"
-GROK_BUILD_MODEL = "grok-4.6"
+GROK_MODEL = "grok-4.7-xhigh"
+GROK_BUILD_MODEL = "grok-4.7"
 GROK_BUILD_EFFORT = "xhigh"
 ANTIGRAVITY_MODEL = "gemini-3.8-flash-high"
 ANTIGRAVITY_EFFORT = "high"
@@ -196,6 +196,71 @@ def resolve_antigravity_bin():
     return None
 
 
+def resolve_antigravity_settings_path(env=None):
+    """Resolve Antigravity headless sandbox settings path.
+
+    Use the same HOME-based path that the Antigravity CLI reads.
+    """
+    if env is None:
+        env = os.environ
+    home = env.get('HOME') or os.path.expanduser('~')
+    return Path(home) / '.gemini' / 'antigravity-cli' / 'settings.json'
+
+
+def check_antigravity_sandbox_settings(settings_path=None, env=None):
+    """Fail fast unless Antigravity sandbox settings allow headless runs."""
+    path = (Path(settings_path).expanduser() if settings_path is not None
+            else resolve_antigravity_settings_path(env))
+    required = 'enableTerminalSandbox: true and toolPermission: "proceed-in-sandbox"'
+    message = f'Antigravity sandbox settings not ready for headless --sandbox run: {path} must contain {required}'
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        raise ValueError(message) from None
+    if not isinstance(data, dict):
+        raise ValueError(message)
+    if data.get('enableTerminalSandbox') is not True:
+        raise ValueError(message)
+    if data.get('toolPermission') != 'proceed-in-sandbox':
+        raise ValueError(message)
+    return path
+
+
+def antigravity_project_args(workspace, env=None):
+    """Reuse a CLI project for this workspace, or create it once."""
+    if env is None:
+        env = os.environ
+    home = Path(env.get('HOME') or os.path.expanduser('~'))
+    project_dir = home / '.gemini' / 'config' / 'projects'
+    workspace_uri = Path(workspace).resolve().as_uri()
+    for project_file in sorted(project_dir.glob('*.json')):
+        try:
+            data = json.loads(project_file.read_text())
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        project_id = data.get('id')
+        if not isinstance(project_id, str) or not project_id.strip():
+            continue
+        project_resources = data.get('projectResources')
+        if not isinstance(project_resources, dict):
+            continue
+        resources = project_resources.get('resources')
+        if not isinstance(resources, list):
+            continue
+        for resource in resources:
+            if not isinstance(resource, dict):
+                continue
+            folder_uri = resource.get('folderUri')
+            git_folder = resource.get('gitFolder')
+            if not isinstance(folder_uri, str) and isinstance(git_folder, dict):
+                folder_uri = git_folder.get('folderUri')
+            if folder_uri == workspace_uri:
+                return ['--project', project_id]
+    return ['--new-project']
+
+
 def cursor_base_argv(cursor_bin):
     name = Path(cursor_bin).name if cursor_bin else ''
     if name in ('agent', 'cursor-agent'):
@@ -288,10 +353,9 @@ def grok_build_inventory_ok(text):
             return True
     for line in text.splitlines():
         parts = line.split()
+        if parts and parts[0] in ('*', '-', '•'):
+            parts = parts[1:]
         if parts and parts[0] == GROK_BUILD_MODEL:
-            return True
-    for tok in re.split(r'[\s,;|]+', text):
-        if tok.strip('"\'`') == GROK_BUILD_MODEL:
             return True
     return False
 
@@ -538,6 +602,23 @@ def main(argv=None):
         parser.error('--trust applies only to grok (Cursor) provider')
     if provider == 'grok' and args.mode == 'work':
         parser.error('grok provider supports ask mode only; implementation belongs to Muse')
+    owned = []
+    if not args.check:
+        for raw in args.allow_path:
+            rel = Path(raw)
+            if any(c in raw for c in '*?['):
+                parser.error('--allow-path must be literal, not a glob')
+            if rel.is_absolute() or '..' in rel.parts or str(rel) in ('.', ''):
+                parser.error('--allow-path must name a bounded workspace-relative file/directory')
+            if '.git' in rel.parts:
+                parser.error('Git internals cannot be an owned edit path')
+            if not (workspace / rel).resolve().is_relative_to(workspace):
+                parser.error('owned path escapes workspace')
+            owned.append(rel)
+        if args.mode == 'ask' and owned:
+            parser.error('ask mode does not permit editing ownership')
+        if args.mode == 'work' and not owned:
+            parser.error('work mode requires --allow-path for its owned scope')
     if provider == 'muse':
         opencode_bin = resolve_opencode_bin()
         if not opencode_bin or not os.access(opencode_bin, os.X_OK):
@@ -583,6 +664,7 @@ def main(argv=None):
         agy_bin = resolve_antigravity_bin()
         if not agy_bin or not os.access(agy_bin, os.X_OK):
             parser.error('Antigravity CLI (agy) not found or not executable')
+        check_antigravity_sandbox_settings(env=sanitized_provider_env())
         if args.check:
             raw = preflight([agy_bin, 'models'], min(args.timeout, 30))
             if not antigravity_inventory_ok(raw):
@@ -607,22 +689,6 @@ def main(argv=None):
         prompt = sys.stdin.read()
     if not prompt.strip():
         parser.error('prompt is empty')
-    owned = []
-    for raw in args.allow_path:
-        rel = Path(raw)
-        if any(c in raw for c in '*?['):
-            parser.error('--allow-path must be literal, not a glob')
-        if rel.is_absolute() or '..' in rel.parts or str(rel) in ('.', ''):
-            parser.error('--allow-path must name a bounded workspace-relative file/directory')
-        if '.git' in rel.parts:
-            parser.error('Git internals cannot be an owned edit path')
-        if not (workspace / rel).resolve().is_relative_to(workspace):
-            parser.error('owned path escapes workspace')
-        owned.append(rel)
-    if args.mode == 'ask' and owned:
-        parser.error('ask mode does not permit editing ownership')
-    if args.mode == 'work' and not owned:
-        parser.error('work mode requires --allow-path for its owned scope')
     if args.run_id and not args.run_dir:
         parser.error('--run-id requires --run-dir')
     if not args.run_dir:
@@ -689,7 +755,8 @@ def main(argv=None):
         else:
             agy_mode = 'plan' if args.mode == 'ask' else 'accept-edits'
             print_timeout = f'{int(args.timeout)}s'
-            command = [agy_bin, '--output-format', 'json', '--model', ANTIGRAVITY_MODEL,
+            project_args = antigravity_project_args(workspace, sanitized_provider_env())
+            command = [agy_bin, *project_args, '--sandbox', '--output-format', 'json', '--model', ANTIGRAVITY_MODEL,
                        '--effort', ANTIGRAVITY_EFFORT, '--mode', agy_mode,
                        '--print-timeout', print_timeout, f'--print={final_prompt}']
             child_env = sanitized_provider_env()

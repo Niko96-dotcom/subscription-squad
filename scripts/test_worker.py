@@ -44,6 +44,35 @@ def write_stub(path, content):
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
+def make_antigravity_settings(payload=None, raw=None):
+    directory = pathlib.Path(tempfile.mkdtemp(prefix='agy-settings-'))
+    path = directory / 'settings.json'
+    if raw is not None:
+        path.write_text(raw)
+    else:
+        if payload is None:
+            payload = {'enableTerminalSandbox': True, 'toolPermission': 'proceed-in-sandbox'}
+        path.write_text(json.dumps(payload))
+    return path
+
+
+def make_antigravity_home(workspace, write_paths=(), payload=None, raw=None):
+    home = pathlib.Path(tempfile.mkdtemp(prefix='agy-home-'))
+    settings_dir = home / '.gemini' / 'antigravity-cli'
+    settings_dir.mkdir(parents=True)
+    if payload is None and raw is None:
+        root = str(pathlib.Path(workspace).resolve())
+        allow = [f'read_file({root})']
+        allow.extend(f'write_file({pathlib.Path(workspace).resolve() / path})'
+                     for path in write_paths)
+        payload = {'enableTerminalSandbox': True,
+                   'toolPermission': 'proceed-in-sandbox',
+                   'permissions': {'allow': allow}}
+    settings = settings_dir / 'settings.json'
+    settings.write_text(raw if raw is not None else json.dumps(payload))
+    return home
+
+
 MUSE_STUB = """#!/usr/bin/env python3
 import atexit
 import sys, os, json, pathlib, subprocess, time
@@ -144,7 +173,7 @@ if 'models' in sys.argv:
     if mode == 'missing':
         print('other-model  Other')
     else:
-        print('cursor-grok-4.6-xhigh  Grok model')
+        print('grok-4.7-xhigh  Grok model')
         print('other-model  Other')
     sys.exit(0)
 if '--print' in sys.argv:
@@ -168,7 +197,7 @@ if '--print' in sys.argv:
         print(json.dumps({'type': 'result', 'subtype': 'success', 'result': 'bad edit', 'is_error': False}))
         sys.exit(0)
     else:
-        print(json.dumps({'type': 'result', 'subtype': 'success', 'result': 'grok ok', 'is_error': False, 'model': 'cursor-grok-4.6-xhigh', 'sessionID': 'ses_g'}))
+        print(json.dumps({'type': 'result', 'subtype': 'success', 'result': 'grok ok', 'is_error': False, 'model': 'grok-4.7-xhigh', 'sessionID': 'ses_g'}))
         sys.exit(0)
 print('unexpected cursor stub', file=sys.stderr)
 sys.exit(2)
@@ -199,7 +228,7 @@ if 'models' in sys.argv:
     if mode == 'missing':
         print('other-model  Other')
     else:
-        print('grok-4.6  Grok model')
+        print('grok-4.7  Grok model')
         print('other-model  Other')
     sys.exit(0)
 if '--single' in sys.argv:
@@ -396,7 +425,7 @@ class WorkerTests(unittest.TestCase):
         self.assertIn('--workspace', argv)
         self.assertIn(str(ws.resolve()), argv)
         self.assertIn('--model', argv)
-        self.assertIn(GROK, argv)
+        self.assertEqual(argv[argv.index('--model') + 1], 'grok-4.7-xhigh')
         self.assertIn('--mode', argv)
         self.assertIn('ask', argv)
         self.assertIn('--trust', argv)
@@ -904,6 +933,7 @@ class WorkerTests(unittest.TestCase):
         argv = json.loads(argv_file.read_text())
         self.assertEqual(argv[argv.index('--cwd') + 1], str(ws.resolve()))
         self.assertEqual(argv[argv.index('--model') + 1], GROK_BUILD)
+        self.assertEqual(GROK_BUILD, 'grok-4.7')
         self.assertEqual(argv[argv.index('--reasoning-effort') + 1], 'xhigh')
         self.assertEqual(argv[argv.index('--permission-mode') + 1], 'plan')
         self.assertIn('--no-subagents', argv)
@@ -955,8 +985,10 @@ class WorkerTests(unittest.TestCase):
         argv_file = stubdir / 'argv.json'
         env_file = stubdir / 'env.json'
         cwd_file = stubdir / 'cwd.txt'
+        home = make_antigravity_home(ws)
         env = {'SUBSCRIPTION_SQUAD_ANTIGRAVITY_BIN': str(stub), 'STUB_ARGV_FILE': str(argv_file),
                'STUB_ENV_FILE': str(env_file), 'STUB_CWD_FILE': str(cwd_file),
+               'HOME': str(home),
                'GEMINI_API_KEY': 'secret', 'OPENAI_API_KEY': 'sk-x', 'STUB_BEHAVIOR': 'ok'}
         r = invoke(['--workspace', str(ws), '--provider', 'antigravity', '--mode', 'ask',
                     '--run-dir', str(run_dir), 'hello agy'], env_extra=env)
@@ -966,6 +998,8 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(argv[argv.index('--effort') + 1], 'high')
         self.assertEqual(argv[argv.index('--mode') + 1], 'plan')
         self.assertEqual(argv[argv.index('--output-format') + 1], 'json')
+        self.assertIn('--new-project', argv)
+        self.assertIn('--sandbox', argv)
         self.assertIn('--print-timeout', argv)
         prints = [a for a in argv if a.startswith('--print=')]
         self.assertEqual(len(prints), 1)
@@ -974,6 +1008,7 @@ class WorkerTests(unittest.TestCase):
         # flags must precede --print=<prompt>
         self.assertLess(argv.index('--model'), argv.index(prints[0]))
         self.assertLess(argv.index('--mode'), argv.index(prints[0]))
+        self.assertLess(argv.index('--sandbox'), argv.index(prints[0]))
         joined = ' '.join(argv)
         for bad in ('--trust', '--dangerously-skip-permissions', '--disable-slash-commands', 'always-approve', 'bypassPermissions', '--yolo'):
             self.assertNotIn(bad, joined)
@@ -990,15 +1025,20 @@ class WorkerTests(unittest.TestCase):
         run_dir = pathlib.Path(tempfile.mkdtemp(prefix='runs-')) / 'run1'
         argv_file = stubdir / 'argv.json'
         cwd_file = stubdir / 'cwd.txt'
+        home = make_antigravity_home(ws, ['owned.txt'])
         r = invoke(['--workspace', str(ws), '--provider', 'antigravity', '--mode', 'work',
                     '--allow-path', 'owned.txt', '--run-dir', str(run_dir), 'do work'],
                    env_extra={'SUBSCRIPTION_SQUAD_ANTIGRAVITY_BIN': str(stub),
+                              'HOME': str(home),
                               'STUB_ARGV_FILE': str(argv_file), 'STUB_CWD_FILE': str(cwd_file),
                               'STUB_BEHAVIOR': 'ok'})
         self.assertEqual(r.returncode, 0, msg=r.stderr.decode()[:2000] + r.stdout.decode()[:2000])
         argv = json.loads(argv_file.read_text())
         self.assertEqual(argv[argv.index('--mode') + 1], 'accept-edits')
+        self.assertIn('--new-project', argv)
+        self.assertIn('--sandbox', argv)
         prints = [a for a in argv if a.startswith('--print=')]
+        self.assertLess(argv.index('--sandbox'), argv.index(prints[0]))
         self.assertIn('owned.txt', prints[0])
         receipt = json.loads((run_dir / 'receipt.json').read_text())
         self.assertEqual(receipt['provider'], 'antigravity')
@@ -1027,14 +1067,163 @@ class WorkerTests(unittest.TestCase):
         stubdir = pathlib.Path(tempfile.mkdtemp(prefix='stub-'))
         stub = stubdir / 'agy'
         write_stub(stub, ANTIGRAVITY_STUB)
+        home = make_antigravity_home(ws)
         r = invoke(['--workspace', str(ws), '--provider', 'antigravity', '--check'],
-                   env_extra={'SUBSCRIPTION_SQUAD_ANTIGRAVITY_BIN': str(stub), 'STUB_INVENTORY_MODE': 'ok'})
+                   env_extra={'SUBSCRIPTION_SQUAD_ANTIGRAVITY_BIN': str(stub), 'STUB_INVENTORY_MODE': 'ok',
+                              'HOME': str(home)})
         self.assertEqual(r.returncode, 0, msg=r.stderr.decode()[:1000])
         self.assertIn('subscription_squad_check=ok', r.stdout.decode())
         self.assertIn(AGY, r.stdout.decode())
         r2 = invoke(['--workspace', str(ws), '--provider', 'antigravity', '--check'],
-                    env_extra={'SUBSCRIPTION_SQUAD_ANTIGRAVITY_BIN': str(stub), 'STUB_INVENTORY_MODE': 'missing'})
+                    env_extra={'SUBSCRIPTION_SQUAD_ANTIGRAVITY_BIN': str(stub), 'STUB_INVENTORY_MODE': 'missing',
+                               'HOME': str(home)})
         self.assertNotEqual(r2.returncode, 0)
+
+    def test_antigravity_settings_path_and_validation(self):
+        self.assertEqual(
+            W.resolve_antigravity_settings_path({
+                'SUBSCRIPTION_SQUAD_ANTIGRAVITY_SETTINGS': '/tmp/custom/settings.json',
+                'HOME': '/tmp/home'}),
+            pathlib.Path('/tmp/home/.gemini/antigravity-cli/settings.json'))
+        self.assertEqual(
+            W.resolve_antigravity_settings_path({'HOME': '/tmp/fake-home'}),
+            pathlib.Path('/tmp/fake-home/.gemini/antigravity-cli/settings.json'))
+
+        good = make_antigravity_settings()
+        self.assertEqual(W.check_antigravity_sandbox_settings(settings_path=good), good)
+
+        invalid = (
+            make_antigravity_settings(raw='{not json'),
+            make_antigravity_settings(raw='[]'),
+            make_antigravity_settings(payload={
+                'enableTerminalSandbox': False,
+                'toolPermission': 'proceed-in-sandbox'}),
+            make_antigravity_settings(payload={
+                'enableTerminalSandbox': True,
+                'toolPermission': 'request-review'}),
+        )
+        missing = pathlib.Path(tempfile.mkdtemp(prefix='agy-settings-')) / 'missing.json'
+        for path in (*invalid, missing):
+            with self.subTest(path=path), self.assertRaises(ValueError) as ctx:
+                W.check_antigravity_sandbox_settings(settings_path=path)
+            message = str(ctx.exception)
+            self.assertIn(str(path), message)
+            self.assertIn('enableTerminalSandbox', message)
+            self.assertIn('toolPermission', message)
+
+    def test_antigravity_bad_settings_fail_before_cli(self):
+        for payload in (
+            {'enableTerminalSandbox': False, 'toolPermission': 'proceed-in-sandbox'},
+            {'enableTerminalSandbox': True, 'toolPermission': 'request-review'},
+        ):
+            with self.subTest(payload=payload):
+                ws = make_workspace()
+                stubdir = pathlib.Path(tempfile.mkdtemp(prefix='stub-'))
+                stub = stubdir / 'agy'
+                write_stub(stub, ANTIGRAVITY_STUB)
+                argv_file = stubdir / 'argv.json'
+                home = make_antigravity_home(ws, payload=payload)
+                settings = home / '.gemini' / 'antigravity-cli' / 'settings.json'
+                result = invoke(
+                    ['--workspace', str(ws), '--provider', 'antigravity', '--check'],
+                    env_extra={
+                        'SUBSCRIPTION_SQUAD_ANTIGRAVITY_BIN': str(stub),
+                        'HOME': str(home),
+                        'STUB_ARGV_FILE': str(argv_file),
+                    })
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(argv_file.exists())
+                self.assertIn(str(settings), result.stderr.decode())
+
+    def test_antigravity_workspace_files_need_no_global_grant(self):
+        ws = make_workspace()
+        good = make_antigravity_settings()
+        self.assertEqual(
+            W.check_antigravity_sandbox_settings(settings_path=good),
+            good)
+
+    def test_antigravity_project_reuse_or_create(self):
+        ws = make_workspace()
+        home = pathlib.Path(tempfile.mkdtemp(prefix='agy-home-'))
+        self.assertEqual(W.antigravity_project_args(ws, {'HOME': str(home)}), ['--new-project'])
+        project_dir = home / '.gemini' / 'config' / 'projects'
+        project_dir.mkdir(parents=True)
+        (project_dir / 'match.json').write_text(json.dumps({
+            'id': 'project-123',
+            'projectResources': {'resources': [{'folderUri': ws.resolve().as_uri()}]}}))
+        self.assertEqual(
+            W.antigravity_project_args(ws, {'HOME': str(home)}),
+            ['--project', 'project-123'])
+        (project_dir / 'broken.json').write_text('{bad json')
+        self.assertEqual(
+            W.antigravity_project_args(ws, {'HOME': str(home)}),
+            ['--project', 'project-123'])
+
+    def test_antigravity_project_malformed_resources_empty_id_and_gitfolder(self):
+        ws = make_workspace()
+        home = pathlib.Path(tempfile.mkdtemp(prefix='agy-home-'))
+        project_dir = home / '.gemini' / 'config' / 'projects'
+        project_dir.mkdir(parents=True)
+        env = {'HOME': str(home)}
+
+        # Malformed projectResources shapes must be skipped and return ['--new-project']
+        malformed_shapes = [
+            {'id': 'stale', 'projectResources': None},
+            {'id': 'str-res', 'projectResources': 'invalid'},
+            {'id': 'list-res', 'projectResources': [{'folderUri': ws.resolve().as_uri()}]},
+            {'id': 'num-res', 'projectResources': 123},
+            {'id': 'null-list', 'projectResources': {'resources': None}},
+            {'id': 'str-list', 'projectResources': {'resources': 'invalid'}},
+            {'id': 'default-cli-project', 'name': 'CLI Project', 'projectResources': {}},
+        ]
+        for i, shape in enumerate(malformed_shapes):
+            p = project_dir / f'bad_{i}.json'
+            p.write_text(json.dumps(shape))
+            self.assertEqual(W.antigravity_project_args(ws, env), ['--new-project'])
+            p.unlink()
+
+        # Malformed earlier entry does not prevent later valid match
+        (project_dir / '00-stale.json').write_text(json.dumps({'id': 'stale', 'projectResources': None}))
+        (project_dir / '01-match.json').write_text(json.dumps({
+            'id': 'match-456',
+            'name': 'subscription-squad',
+            'projectResources': {'resources': [{'folderUri': ws.resolve().as_uri()}]}}))
+        self.assertEqual(W.antigravity_project_args(ws, env), ['--project', 'match-456'])
+        (project_dir / '00-stale.json').unlink()
+        (project_dir / '01-match.json').unlink()
+
+        # Empty project IDs must not be reused
+        for empty_id in ('', '   '):
+            (project_dir / 'empty_id.json').write_text(json.dumps({
+                'id': empty_id,
+                'projectResources': {'resources': [{'folderUri': ws.resolve().as_uri()}]}}))
+            self.assertEqual(W.antigravity_project_args(ws, env), ['--new-project'])
+            (project_dir / 'empty_id.json').unlink()
+
+        # Earlier empty ID skipped in favor of later valid matching entry
+        (project_dir / '00-empty.json').write_text(json.dumps({
+            'id': '',
+            'projectResources': {'resources': [{'folderUri': ws.resolve().as_uri()}]}}))
+        (project_dir / '01-valid.json').write_text(json.dumps({
+            'id': 'valid-789',
+            'projectResources': {'resources': [{'folderUri': ws.resolve().as_uri()}]}}))
+        self.assertEqual(W.antigravity_project_args(ws, env), ['--project', 'valid-789'])
+        (project_dir / '00-empty.json').unlink()
+        (project_dir / '01-valid.json').unlink()
+
+        # Nested gitFolder resource matching
+        (project_dir / 'git-proj.json').write_text(json.dumps({
+            'id': 'project-git',
+            'name': 'Forge',
+            'projectResources': {
+                'resources': [{
+                    'gitFolder': {
+                        'folderUri': ws.resolve().as_uri(),
+                        'allowWrite': True,
+                    }
+                }]
+            }}))
+        self.assertEqual(W.antigravity_project_args(ws, env), ['--project', 'project-git'])
 
     def test_trust_rejected_for_new_providers(self):
         ws = make_workspace()
@@ -1190,20 +1379,30 @@ class WorkerTests(unittest.TestCase):
                 stub = stubdir / 'agy'
                 write_stub(stub, ANTIGRAVITY_STUB)
                 run_dir = pathlib.Path(tempfile.mkdtemp(prefix='runs-')) / 'run1'
+                home = make_antigravity_home(ws)
                 r = invoke(['--workspace', str(ws), '--provider', 'antigravity', '--run-dir', str(run_dir), 'hi'],
-                           env_extra={'SUBSCRIPTION_SQUAD_ANTIGRAVITY_BIN': str(stub), 'STUB_BEHAVIOR': beh})
+                           env_extra={'SUBSCRIPTION_SQUAD_ANTIGRAVITY_BIN': str(stub), 'STUB_BEHAVIOR': beh,
+                                      'HOME': str(home)})
                 self.assertNotEqual(r.returncode, 0, msg=beh)
                 receipt = json.loads((run_dir / 'receipt.json').read_text())
                 self.assertEqual(receipt['status'], 'worker_failed')
 
     def test_inventory_ok_new_providers(self):
-        self.assertTrue(W.grok_build_inventory_ok('grok-4.6  Grok model\n'))
+        self.assertTrue(W.grok_build_inventory_ok('grok-4.7  Grok model\n'))
+        self.assertTrue(W.grok_build_inventory_ok('  * grok-4.7 (default)\n  - grok-4.7-build-fast\n'))
         self.assertFalse(W.grok_build_inventory_ok('other-model  Other\n'))
-        self.assertFalse(W.grok_build_inventory_ok('grok-4.6-fast  Other\n'))
+        self.assertFalse(W.grok_build_inventory_ok('grok-4.7-build-fast  Other\n'))
+        self.assertFalse(W.grok_build_inventory_ok('grok-4.7-build-fast  variant of grok-4.7\n'))
+        self.assertFalse(W.grok_build_inventory_ok('grok-4.6  Grok model\n'))
         self.assertTrue(W.antigravity_inventory_ok('gemini-3.8-flash-high  Gemini 3.8 Flash (High)'))
         self.assertFalse(W.antigravity_inventory_ok('other-model  Other'))
-        self.assertTrue(W.grok_build_inventory_ok(json.dumps({'id': 'grok-4.6'})))
+        self.assertTrue(W.grok_build_inventory_ok(json.dumps({'id': 'grok-4.7'})))
+        self.assertFalse(W.grok_build_inventory_ok(json.dumps({'id': 'grok-4.7-build-fast'})))
+        self.assertFalse(W.grok_build_inventory_ok(json.dumps({'name': 'grok-4.7', 'id': 'grok-4.7-build-fast'})))
         self.assertTrue(W.antigravity_inventory_ok(json.dumps({'id': 'gemini-3.8-flash-high'})))
+        self.assertTrue(W.grok_inventory_ok('grok-4.7-xhigh  Grok model\n'))
+        self.assertFalse(W.grok_inventory_ok('grok-4.7-xhigh-fast  Grok model\n'))
+        self.assertFalse(W.grok_inventory_ok('cursor-grok-4.6-xhigh  Grok model\n'))
 
     def test_resolve_env_override_and_fallback(self):
         with patch.dict(os.environ, {'SUBSCRIPTION_SQUAD_GROK_BUILD_BIN': '/tmp/custom-grok'}):
@@ -1230,8 +1429,10 @@ class WorkerTests(unittest.TestCase):
                 stubdir = pathlib.Path(tempfile.mkdtemp(prefix='stub-'))
                 stub = stubdir / stubname
                 write_stub(stub, stubsrc)
+                home = make_antigravity_home(ws)
                 r = invoke(['--workspace', str(ws), '--provider', prov, '--check'],
                            env_extra={key: str(stub), 'STUB_INVENTORY_MODE': 'ok',
+                                      'HOME': str(home),
                                       'CURSOR_API_KEY': 'secret-should-not-leak',
                                       'OPENAI_API_KEY': 'sk-should-not-leak'})
                 self.assertEqual(r.returncode, 0, msg=r.stderr.decode()[:1000])
@@ -1259,9 +1460,11 @@ class WorkerTests(unittest.TestCase):
                 stub = stubdir / stubname
                 write_stub(stub, stubsrc)
                 run_dir = pathlib.Path(tempfile.mkdtemp(prefix='runs-')) / 'run1'
+                home = make_antigravity_home(ws)
                 r = invoke(['--workspace', str(ws), '--provider', prov,
                             '--run-dir', str(run_dir), *extra, 'hi'],
-                           env_extra={key: str(stub), 'STUB_BEHAVIOR': 'ok'})
+                           env_extra={key: str(stub), 'STUB_BEHAVIOR': 'ok',
+                                      'HOME': str(home)})
                 self.assertEqual(r.returncode, 0, msg=r.stderr.decode()[:1000] + r.stdout.decode()[:1000])
                 receipt = json.loads((run_dir / 'receipt.json').read_text())
                 self.assertEqual(receipt.get('provider_bin'), str(stub))
@@ -1314,7 +1517,8 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(W.cursor_base_argv('/tmp/cursor'), ['/tmp/cursor', 'agent'])
 
     def test_legacy_muse_grok_regression(self):
-        self.assertEqual(W.GROK_MODEL, 'cursor-grok-4.6-xhigh')
+        self.assertEqual(W.GROK_MODEL, 'grok-4.7-xhigh')
+        self.assertEqual(W.GROK_BUILD_MODEL, 'grok-4.7')
         self.assertEqual(W.MUSE_MODEL, 'opencode-go/muse-spark-1.3-contributor')
         # legacy grok stays ask-only; trust stays cursor-only; steps stays muse-only
         ws = make_workspace()

@@ -6,10 +6,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](Makefile)
 
-Keep Codex as a lean coordinator. Delegate bounded implementation to
-Muse Spark 1.3 Contributor via OpenCode Go, Grok 4.6 via native Grok Build,
-or Gemini 3.8 Flash via Antigravity — and independent review to Grok 4.6
-via Cursor (legacy) or the native routes — using logins and subscriptions
+Keep Astra as the lean coordinator, architect, and final decision maker. Delegate bounded implementation to
+Muse Spark 1.3 Contributor via OpenCode Go — and independent review to Grok 4.7 xhigh
+via Cursor (legacy) — with Gemini 3.8 Flash via Antigravity for structured extraction
+or a selected alternate implementation slice, and native Grok Build ask as an alternate
+read-only route — using logins and subscriptions
 you already have. No new accounts, no billing changes, no permission expansion.
 
 ```bash
@@ -27,11 +28,14 @@ authoritative for flags. This README is only the landing page.
 macOS or Linux, Python 3.10+, and Git. Live workers also need the OpenCode
 CLI logged in to OpenCode Go, the Cursor CLI logged in with access to
 the exact models above, the Grok Build CLI (`grok`) logged in with access
-to `grok-4.6`, and the Antigravity CLI (`agy`) logged in with access to
-`gemini-3.8-flash-high`. Tests need neither provider nor login. Run all
+to `grok-4.7`, and the Antigravity CLI (`agy`) logged in with access to
+`gemini-3.8-flash-high`. Headless Antigravity runs also require
+`enableTerminalSandbox: true` and `toolPermission: "proceed-in-sandbox"` in
+`~/.gemini/antigravity-cli/settings.json`. The runner validates these values,
+binds the cwd as a project, and forces `--sandbox`. Tests need neither provider nor login. Run all
 `--check` commands below: model availability and subscription quotas can change.
 
-## Install the skill for Codex
+## Install the skill
 
 Copy the skill files into your Codex skills directory. The snippet refuses
 an existing destination — including a dangling symlink — and the final
@@ -51,7 +55,7 @@ cp "$SRC/SKILL.md" "$DEST/SKILL.md" &&
 cp -R "$SRC/scripts" "$SRC/references" "$SRC/agents" "$DEST/"
 ```
 
-Invoke from Codex with the skill name, for example:
+Invoke in Codex with the skill name, for example:
 
 ```text
 $subscription-squad implement <owned paths> per SKILL.md with a frozen brief
@@ -82,16 +86,15 @@ python3 scripts/worker.py --provider muse --mode work \
   --prompt-file /ABSOLUTE/prompts/brief.txt --run-dir /ABSOLUTE/task-runs/work-1 --timeout 900
 ```
 
-Native alternatives (subscription/account-backed; fixed effort recorded truthfully in receipts):
+Selected alternate implementation (only for a concrete fit; every candidate still needs tests and review):
 
 ```bash
-python3 scripts/worker.py --provider grok-build --mode work \
-  --workspace /ABSOLUTE/checkout --allow-path src/owned_file.py \
-  --prompt-file /ABSOLUTE/prompts/brief.txt --run-dir /ABSOLUTE/task-runs/work-gb-1 --timeout 900
 python3 scripts/worker.py --provider antigravity --mode work \
   --workspace /ABSOLUTE/checkout --allow-path src/owned_file.py \
   --prompt-file /ABSOLUTE/prompts/brief.txt --run-dir /ABSOLUTE/task-runs/work-agy-1 --timeout 900
 ```
+
+Native Grok Build work remains supported by the runner but is off the default path after repeated cancelled trials without edits; retry only as a bounded useful retest with acceptance evidence — see [SKILL.md](SKILL.md).
 
 **3. Review with Grok** (legacy Cursor, read-only; no `--allow-path`):
 
@@ -122,7 +125,7 @@ fixture you created. See [examples/](examples/) for brief shapes.
 python3 scripts/collect.py /ABSOLUTE/task-runs --state /ABSOLUTE/collection-state.json
 ```
 
-**5. Accept (you, not a worker).** `candidate` means transport and
+**5. Accept (Astra, not a worker).** `candidate` means transport and
 preservation checks passed — not acceptance. Inspect the diff, run focused
 checks and the repo gate yourself, and integrate only what passes.
 
@@ -138,9 +141,11 @@ Full flag details: `python3 scripts/worker.py --help`,
   private data from the checkout before delegating. See [SKILL.md](SKILL.md).
 - **Small packages, bounded calls.** Default: 1 implementation + 1
   cross-model review, max 2 concurrent workers in separate workspaces,
-  6 calls per task, 900 s per call, 60 model steps (Muse-only). Grok Build
-  uses fixed `xhigh` reasoning; Antigravity uses fixed `high` effort with
-  `gemini-3.8-flash-high`. Details in [SKILL.md](SKILL.md).
+  6 calls per task including failures, max 2 implementation attempts per package,
+  900 s per call, 60 model steps (Muse-only). Reserve 2 calls for review/repair;
+  state a larger finite budget before dispatch for larger tasks within the authorized scope.
+  Grok Build uses fixed `xhigh` reasoning; Antigravity uses fixed `high` effort with
+  `gemini-3.8-flash-high` (never `xhigh`). Details in [SKILL.md](SKILL.md).
 - **Privacy is about inputs.** Muse Contributor is marked
   training-enabled without zero data retention: do not send secrets,
   private personal records, or excluded code as input down that route.
@@ -158,12 +163,18 @@ Full flag details: `python3 scripts/worker.py --help`,
   for sensitive material.
 - **Receipts are evidence, not a sandbox.** Manifests cover tracked and
   non-ignored files plus the index and `HEAD`; ignored and external files
-  are not covered. Tool permissions and manifests do not isolate processes like an OS
-  sandbox. Fresh `--run-dir` directories are created mode `0700`, but treat transcripts
-  as sensitive anyway. Coordinator checks decide acceptance. Receipts record
+   are not covered. Tool permissions and manifests do not isolate processes like an OS
+   sandbox. Fresh `--run-dir` directories are created mode `0700`, but treat transcripts
+   as sensitive anyway. Astra checks decide acceptance. Receipts record
   provider, requested model, and actual effort/variant truthfully (`high`, not
   `xhigh`, for Antigravity); reported `modelUsage`/session metadata is preserved
   without claiming it is independent attestation of hidden reasoning.
+- **Antigravity fails closed.** Before invoking `agy`, the runner requires the
+  sandbox settings above, reuses a project bound to the cwd (or creates it once),
+  and passes `--sandbox` on every ask and work call. Project binding makes the cwd the recognized workspace, whose file
+  tools are allowed by Antigravity's workspace policy. Outside-workspace access
+  can still require review and fail in headless mode; the runner never adds
+  dangerous-skip or always-proceed modes.
 - **Billing unchanged.** Existing auth only; the runner never enables
   overage or changes credentials, but provider-side overage settings can
   still bill. Native Grok Build and Antigravity routes are

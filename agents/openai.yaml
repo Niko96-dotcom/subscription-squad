@@ -1,4 +1,4 @@
 interface:
   display_name: "Subscription Squad"
-  short_description: "External workers plus review, led by Codex"
-  default_prompt: "Use $subscription-squad for this task, where Codex coordinates and accepts while substantive work dispatches at least one bounded external worker."
+  short_description: "Astra-led delegation to bounded subscription workers"
+  default_prompt: "Use $subscription-squad to complete this task with Astra coordinating external workers and accepting verified results."
