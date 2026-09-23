@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 
 MUSE_MODEL = "opencode-go/muse-spark-1.3-contributor"
 MUSE_VARIANT = "xhigh"
+SPACE_BUNNY_MODEL = "opencode-go/space-bunny-free"
+SPACE_BUNNY_VARIANT = "max"
 GROK_MODEL = "grok-4.7-xhigh"
 GROK_BUILD_MODEL = "grok-4.7"
 GROK_BUILD_EFFORT = "xhigh"
@@ -330,13 +332,18 @@ def _scalar_model_reported(meta):
     return None
 
 
-def muse_inventory_ok(text):
+def opencode_inventory_ok(text, model, variant):
+    provider_id, model_id = model.split('/', 1)
     return any(isinstance(item, dict)
-               and item.get('id') == 'muse-spark-1.3-contributor'
-               and item.get('providerID') == 'opencode-go'
+               and item.get('id') == model_id
+               and item.get('providerID') == provider_id
                and isinstance(item.get('variants'), dict)
-               and MUSE_VARIANT in item['variants']
+               and variant in item['variants']
                for item in extract_json_objects(text))
+
+
+def muse_inventory_ok(text):
+    return opencode_inventory_ok(text, MUSE_MODEL, MUSE_VARIANT)
 
 
 def grok_inventory_ok(text):
@@ -372,7 +379,7 @@ def antigravity_inventory_ok(text):
     return False
 
 
-def build_opencode_config(mode, owned, steps=60):
+def build_opencode_config(mode, owned, steps=60, model=MUSE_MODEL):
     if mode == 'ask':
         edit_perm = 'deny'
         webfetch_perm = 'allow'
@@ -395,14 +402,14 @@ def build_opencode_config(mode, owned, steps=60):
         'webfetch': webfetch_perm,
     }
     return {
-        'model': MUSE_MODEL,
-        'small_model': MUSE_MODEL,
+        'model': model,
+        'small_model': model,
         'enabled_providers': ['opencode-go'],
         'share': 'disabled',
         'permission': dict(perms),
         'agent': {
             'squad-worker': {
-                'model': MUSE_MODEL,
+                'model': model,
                 'steps': steps,
                 'mode': 'primary',
                 'permission': dict(perms),
@@ -553,9 +560,9 @@ def lock_path_for(workspace):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--workspace', type=Path, default=Path.cwd())
-    parser.add_argument('--provider', choices=['muse', 'grok', 'grok-build', 'antigravity'], required=True)
-    parser.add_argument('--variant', default='xhigh')
-    parser.add_argument('--steps', type=int, default=None, help='Muse model-step budget: 5..120; default 60; split broad work before increasing')
+    parser.add_argument('--provider', choices=['muse', 'space-bunny', 'grok', 'grok-build', 'antigravity'], required=True)
+    parser.add_argument('--variant', default=None)
+    parser.add_argument('--steps', type=int, default=None, help='OpenCode model-step budget: 5..120; default 60; split broad work before increasing')
     parser.add_argument('--mode', choices=['ask', 'work'], default='ask')
     parser.add_argument('--prompt-file', type=Path)
     parser.add_argument('--run-dir', type=Path)
@@ -573,11 +580,12 @@ def main(argv=None):
         parser.error('--timeout must be positive and finite')
     if args.steps is not None and not 5 <= args.steps <= 120:
         parser.error('--steps must be between 5 and 120')
-    if args.steps is not None and args.provider != 'muse':
-        parser.error('--steps applies only to Muse')
+    if args.steps is not None and args.provider not in ('muse', 'space-bunny'):
+        parser.error('--steps applies only to OpenCode routes')
     step_budget = args.steps if args.steps is not None else 60
-    if args.variant != 'xhigh':
-        parser.error('only --variant xhigh is supported')
+    expected_variant = SPACE_BUNNY_VARIANT if args.provider == 'space-bunny' else 'xhigh'
+    if args.variant is not None and args.variant != expected_variant:
+        parser.error(f'only --variant {expected_variant} is supported for {args.provider}')
     workspace = args.workspace.expanduser().resolve(strict=True)
     if not workspace.is_dir():
         parser.error('workspace must be a directory')
@@ -586,6 +594,10 @@ def main(argv=None):
         model_requested = MUSE_MODEL
         provider_variant = MUSE_VARIANT
         provider_effort = 'xhigh'
+    elif provider == 'space-bunny':
+        model_requested = SPACE_BUNNY_MODEL
+        provider_variant = SPACE_BUNNY_VARIANT
+        provider_effort = SPACE_BUNNY_VARIANT
     elif provider == 'grok':
         model_requested = GROK_MODEL
         provider_variant = 'xhigh'
@@ -619,17 +631,17 @@ def main(argv=None):
             parser.error('ask mode does not permit editing ownership')
         if args.mode == 'work' and not owned:
             parser.error('work mode requires --allow-path for its owned scope')
-    if provider == 'muse':
+    if provider in ('muse', 'space-bunny'):
         opencode_bin = resolve_opencode_bin()
         if not opencode_bin or not os.access(opencode_bin, os.X_OK):
             parser.error('opencode CLI not found or not executable')
         if args.check:
             check_env = sanitized_provider_env()
-            check_env['OPENCODE_CONFIG_CONTENT'] = json.dumps(build_opencode_config('ask', [], step_budget))
+            check_env['OPENCODE_CONFIG_CONTENT'] = json.dumps(build_opencode_config('ask', [], step_budget, model_requested))
             raw = preflight([opencode_bin, 'models', 'opencode-go', '--verbose'], min(args.timeout, 30), env=check_env)
-            if not muse_inventory_ok(raw):
-                raise ValueError(f'exact Muse model variant is not available: {MUSE_MODEL} variant {MUSE_VARIANT}')
-            print(f'subscription_squad_check=ok provider=muse model={MUSE_MODEL} variant={MUSE_VARIANT} bin={opencode_bin}')
+            if not opencode_inventory_ok(raw, model_requested, provider_variant):
+                raise ValueError(f'exact OpenCode model variant is not available: {model_requested} variant {provider_variant}')
+            print(f'subscription_squad_check=ok provider={provider} model={model_requested} variant={provider_variant} bin={opencode_bin}')
             return 0
         cursor_bin = None
         grok_build_bin = None
@@ -716,7 +728,7 @@ def main(argv=None):
         atomic_json(run/'before.json', before)
         status_before = digest(git(workspace, 'status', '--porcelain=v1', '-z').stdout)
         head_before = git(workspace, 'rev-parse', 'HEAD').stdout.decode().strip()
-        provider_bin = {'muse': opencode_bin, 'grok': cursor_bin,
+        provider_bin = {'muse': opencode_bin, 'space-bunny': opencode_bin, 'grok': cursor_bin,
                         'grok-build': grok_build_bin, 'antigravity': agy_bin}[provider]
         receipt = {'schema': 'subscription-squad-worker-run/v1', 'run_id': args.run_id or run.name,
                    'workspace': str(workspace), 'provider': provider, 'provider_bin': provider_bin,
@@ -724,16 +736,16 @@ def main(argv=None):
                    'model_requested': model_requested, 'variant': provider_variant, 'effort': provider_effort,
                    'mode': args.mode,
                    'prompt_sha256': digest(build_final_prompt(prompt, args.mode, owned).encode()), 'started_at_utc': now(),
-                   'owned_paths': [str(p) for p in owned], 'timeout_seconds': args.timeout, 'step_budget': step_budget if provider == 'muse' else None,
+                   'owned_paths': [str(p) for p in owned], 'timeout_seconds': args.timeout, 'step_budget': step_budget if provider in ('muse', 'space-bunny') else None,
                    'trust': args.trust, 'status': 'running', 'git_status_before_sha256': status_before,
                    'head_before': head_before}
         atomic_json(run/'receipt.json', receipt)
         final_prompt = build_final_prompt(prompt, args.mode, owned)
-        if provider == 'muse':
-            command = [opencode_bin, 'run', '--pure', '--dir', str(workspace), '--model', MUSE_MODEL,
-                       '--variant', 'xhigh', '--format', 'json', '--agent', 'squad-worker', final_prompt]
+        if provider in ('muse', 'space-bunny'):
+            command = [opencode_bin, 'run', '--pure', '--dir', str(workspace), '--model', model_requested,
+                       '--variant', provider_variant, '--format', 'json', '--agent', 'squad-worker', final_prompt]
             child_env = sanitized_provider_env()
-            child_env['OPENCODE_CONFIG_CONTENT'] = json.dumps(build_opencode_config(args.mode, owned, step_budget))
+            child_env['OPENCODE_CONFIG_CONTENT'] = json.dumps(build_opencode_config(args.mode, owned, step_budget, model_requested))
             child_cwd = None
         elif provider == 'grok':
             command = cursor_base_argv(cursor_bin) + ['--print', '--output-format', 'json', '--workspace', str(workspace), '--model', GROK_MODEL]
@@ -815,7 +827,7 @@ def main(argv=None):
                     code, outcome = 3, 'unverified_preservation'
             try:
                 raw_out = (run/'output.log').read_bytes() if (run/'output.log').exists() else b''
-                if provider == 'muse':
+                if provider in ('muse', 'space-bunny'):
                     result_text, native_meta, saw_error = parse_muse_output(raw_out)
                 elif provider == 'grok':
                     result_text, native_meta, saw_error = parse_grok_output(raw_out)
@@ -823,7 +835,7 @@ def main(argv=None):
                     result_text, native_meta, saw_error = parse_grok_build_output(raw_out)
                 else:
                     result_text, native_meta, saw_error = parse_antigravity_output(raw_out)
-                result_text, work_status, step_limit_reached = classify_handoff(result_text, args.mode, native_meta.get('step_count', 0), step_budget if provider == 'muse' else None)
+                result_text, work_status, step_limit_reached = classify_handoff(result_text, args.mode, native_meta.get('step_count', 0), step_budget if provider in ('muse', 'space-bunny') else None)
                 receipt.update(work_status=work_status, step_count=native_meta.get('step_count'), step_limit_reached=step_limit_reached)
                 (run/'result.txt').write_text(result_text + ('' if (not result_text or result_text.endswith('\n')) else '\n'))
                 model_reported = _scalar_model_reported(native_meta)

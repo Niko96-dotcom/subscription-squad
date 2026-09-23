@@ -4,10 +4,11 @@ Load this reference when dispatching workers. It owns command templates and exac
 
 ## Preflight
 
-Run all four inventory checks once per task, preferably in parallel. They establish exact model inventory and relevant configuration, not quota or successful inference. Resolve the runner relative to the skill file.
+Run the inventory checks for routes you may use once per task, preferably in parallel. They establish exact model inventory and relevant configuration, not quota or successful inference. Resolve the runner relative to the skill file.
 
 ```bash
 python3 <skill>/scripts/worker.py --provider muse --check
+python3 <skill>/scripts/worker.py --provider space-bunny --check
 python3 <skill>/scripts/worker.py --provider grok --check
 python3 <skill>/scripts/worker.py --provider grok-build --check
 python3 <skill>/scripts/worker.py --provider antigravity --check
@@ -23,6 +24,10 @@ Workspaces must exist and be Git checkout roots. Brief files must exist. Each `-
 python3 <skill>/scripts/worker.py --provider muse --mode work \
   --workspace /absolute/checkout --allow-path src/owned_file.py \
   --prompt-file /absolute/brief.txt --run-dir /absolute/runs/work-1 --timeout 900
+
+python3 <skill>/scripts/worker.py --provider space-bunny --mode work \
+  --workspace /absolute/checkout --allow-path src/owned_file.py \
+  --prompt-file /absolute/brief.txt --run-dir /absolute/runs/work-bunny-1 --timeout 900
 
 python3 <skill>/scripts/worker.py --provider antigravity --mode ask \
   --workspace /absolute/checkout \
@@ -47,12 +52,12 @@ python3 <skill>/scripts/collect.py /absolute/runs --state /absolute/collection-s
 
 ## Exact semantics and flags
 
-- `--mode ask` is read-only on all providers: Muse denies edits, Cursor uses ask mode, Grok Build and Antigravity translate ask into native `plan`. `--mode work` uses only non-bypass edit modes: existing prompt ownership plus `acceptEdits` for Grok Build and `accept-edits` for Antigravity.
+- `--mode ask` is read-only on all providers: both OpenCode routes deny edits, Cursor uses ask mode, Grok Build and Antigravity translate ask into native `plan`. `--mode work` uses only non-bypass edit modes: existing prompt ownership plus `acceptEdits` for Grok Build and `accept-edits` for Antigravity.
 - `--allow-path` repeats narrow workspace-relative files or directories. It is literal: no globs, no `..`, no `.git`. Work requires at least one; ask forbids all edits. Only `edit` is bounded; `read`, `glob`, `grep`, and `list` stay workspace-wide.
-- `--trust` is Cursor-only and rejected for all other providers. Use it only for an already authorized workspace or a created fixture. `--steps` is Muse-only (`5..120`, default `60` model steps, independent of wall time); split oversized packages before increasing it. Only `--variant xhigh` is supported. `--timeout` must be positive and finite; default 900.
+- `--trust` is Cursor-only and rejected for all other providers. Use it only for an already authorized workspace or a created fixture. `--steps` is OpenCode-only (`5..120`, default `60` model steps, independent of wall time); split oversized packages before increasing it. Muse pins `--variant xhigh`; Space Bunny pins its advertised `--variant max`; other provider efforts stay as described in [routes](routes.md). `--timeout` must be positive and finite; default 900.
 - Never add always-approve, bypass, force, yolo, dangerous-skip, or equivalent flags. Do not pass `--dangerously-skip-permissions` to Antigravity and do not add `--disable-slash-commands` because it makes Antigravity plan ineffective. Grok Build always runs with `--no-subagents` and `--disable-web-search`.
 - Antigravity every call forces `--sandbox` and preflights `enableTerminalSandbox: true` with `toolPermission: "proceed-in-sandbox"` in the CLI settings file, then reuses a matching CLI project for the workspace or creates it once. Requests outside the recognized workspace can still ask for approval and fail closed in headless mode.
-- The runner pins model and effort; the coordinator never improvises model identifiers. Muse records `xhigh`; legacy Grok and Grok Build record `xhigh`; Antigravity records `high`, never `xhigh`. Receipts record provider, requested model, provider binary, effort, owned paths, and native metadata truthfully without claiming independent attestation of hidden reasoning.
+- The runner pins model and effort; the coordinator never improvises model identifiers. Muse records `xhigh`; Space Bunny records `max`; legacy Grok and Grok Build record `xhigh`; Antigravity records `high`, never `xhigh`. Receipts record provider, requested model, provider binary, effort, owned paths, and native metadata truthfully without claiming independent attestation of hidden reasoning.
 
 ## Readable evidence
 
@@ -68,7 +73,7 @@ Before and after each run the runner records content manifests, index snapshots,
 
 ## Status, partial work, and collection
 
-Workers must finish with exactly one first line of `SQUAD_STATUS: complete`, `partial`, `blocked`, or `needs_context`, then outcome, changed paths, evidence locations, checks actually run, checks not run, remaining work or risks, and the exact next action. Muse cannot run shell checks, so it lists proposed checks as not run and Astra executes them.
+Workers must finish with exactly one first line of `SQUAD_STATUS: complete`, `partial`, `blocked`, or `needs_context`, then outcome, changed paths, evidence locations, checks actually run, checks not run, remaining work or risks, and the exact next action. OpenCode workers cannot run shell checks, so they list proposed checks as not run and Astra executes them.
 
 Runner `candidate` means transport and preservation checks passed, never acceptance. `work_status` separately records the model report; a missing marker is `unreported` and needs inspection of the delivered work. Do not spend another model call merely to reformat a missing marker. Step-limit detection overrides a completion claim. `partial`, `blocked`, or `needs_context` exits `4` as `incomplete` and retains partial edits plus the handoff. A genuine provider error or unfinished stream stays a failure even when partial text exists. An adverse review is complete while rejecting the code: put the verdict and findings in the body, not in a delivery-blocked status. Give partial work a smaller continuation with the current snapshot and exact remaining items; give failures the actual command, excerpt, current files, and contract.
 

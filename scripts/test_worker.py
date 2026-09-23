@@ -15,6 +15,7 @@ import worker as W
 
 WORKER = pathlib.Path(__file__).with_name('worker.py')
 MUSE = W.MUSE_MODEL
+BUNNY = W.SPACE_BUNNY_MODEL
 GROK = W.GROK_MODEL
 GROK_BUILD = W.GROK_BUILD_MODEL
 AGY = W.ANTIGRAVITY_MODEL
@@ -95,12 +96,15 @@ def find_arg(flag):
     return None
 if len(sys.argv) >= 2 and sys.argv[1] == 'models':
     mode = os.environ.get('STUB_INVENTORY_MODE', 'ok')
+    selected = json.loads(os.environ.get('OPENCODE_CONFIG_CONTENT', '{}')).get('model')
+    model_id = 'space-bunny-free' if selected == 'opencode-go/space-bunny-free' else 'muse-spark-1.3-contributor'
+    variant = 'max' if model_id == 'space-bunny-free' else 'xhigh'
     if mode == 'missing':
-        print('muse-spark-1.3-contributor')
-        print(json.dumps({'id': 'muse-spark-1.3-contributor', 'providerID': 'opencode-go', 'variants': {'high': {'reasoningEffort': 'high'}}}))
+        print(model_id)
+        print(json.dumps({'id': model_id, 'providerID': 'opencode-go', 'variants': {'high': {'reasoningEffort': 'high'}}}))
     else:
-        print('muse-spark-1.3-contributor')
-        print(json.dumps({'id': 'muse-spark-1.3-contributor', 'providerID': 'opencode-go', 'variants': {'xhigh': {'reasoningEffort': 'xhigh'}}}))
+        print(model_id)
+        print(json.dumps({'id': model_id, 'providerID': 'opencode-go', 'variants': {variant: {'reasoningEffort': variant}}}))
     sys.exit(0)
 if len(sys.argv) >= 2 and sys.argv[1] == 'run':
     atexit.register(lambda: print(json.dumps({'type': 'step_finish', 'part': {'reason': 'stop', 'tokens': {'input': 10}, 'cost': 0.1}})))
@@ -143,7 +147,8 @@ if len(sys.argv) >= 2 and sys.argv[1] == 'run':
         print(json.dumps({'type': 'text', 'text': 'SQUAD_STATUS: complete\\nhead moved'}))
         sys.exit(0)
     else:
-        print(json.dumps({'type': 'text', 'text': 'hello candidate', 'sessionID': 'ses_1', 'model': 'opencode-go/muse-spark-1.3-contributor'}))
+        selected = json.loads(os.environ.get('OPENCODE_CONFIG_CONTENT', '{}')).get('model')
+        print(json.dumps({'type': 'text', 'text': 'hello candidate', 'sessionID': 'ses_1', 'model': selected}))
         sys.exit(0)
 print('unexpected muse stub', file=sys.stderr)
 sys.exit(2)
@@ -401,6 +406,45 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(cfg['agent']['squad-worker']['permission']['webfetch'], 'deny')
         argv = json.loads(argv_file.read_text())
         self.assertIn('owned.txt', argv[-1])
+
+    def test_space_bunny_max_inventory_and_work_routing(self):
+        ws = make_workspace()
+        stubdir = pathlib.Path(tempfile.mkdtemp(prefix='stub-'))
+        stub = stubdir / 'opencode'
+        write_stub(stub, MUSE_STUB)
+        env = {'SUBSCRIPTION_SQUAD_OPENCODE_BIN': str(stub)}
+        check = invoke(['--workspace', str(ws), '--provider', 'space-bunny', '--check'], env_extra=env)
+        self.assertEqual(check.returncode, 0, msg=check.stderr.decode()[:1000])
+        self.assertIn(BUNNY, check.stdout.decode())
+        self.assertIn('variant=max', check.stdout.decode())
+        missing = invoke(['--workspace', str(ws), '--provider', 'space-bunny', '--check'],
+                         env_extra={**env, 'STUB_INVENTORY_MODE': 'missing'})
+        self.assertNotEqual(missing.returncode, 0)
+        wrong_effort = invoke(['--workspace', str(ws), '--provider', 'space-bunny',
+                               '--variant', 'xhigh', '--check'], env_extra=env)
+        self.assertNotEqual(wrong_effort.returncode, 0)
+
+        argv_file = stubdir / 'argv.json'
+        env_file = stubdir / 'env.json'
+        run_dir = pathlib.Path(tempfile.mkdtemp(prefix='runs-')) / 'run1'
+        result = invoke(['--workspace', str(ws), '--provider', 'space-bunny', '--mode', 'work',
+                         '--allow-path', 'owned.txt', '--steps', '45', '--run-dir', str(run_dir), 'fix it'],
+                        env_extra={**env, 'STUB_ARGV_FILE': str(argv_file), 'STUB_ENV_FILE': str(env_file)})
+        self.assertEqual(result.returncode, 0, msg=result.stderr.decode()[:1000])
+        argv = json.loads(argv_file.read_text())
+        self.assertEqual(argv[argv.index('--model') + 1], BUNNY)
+        self.assertEqual(argv[argv.index('--variant') + 1], 'max')
+        cfg = json.loads(json.loads(env_file.read_text())['OPENCODE_CONFIG_CONTENT'])
+        self.assertEqual(cfg['model'], BUNNY)
+        self.assertEqual(cfg['small_model'], BUNNY)
+        self.assertEqual(cfg['agent']['squad-worker']['model'], BUNNY)
+        self.assertEqual(cfg['agent']['squad-worker']['steps'], 45)
+        self.assertEqual(cfg['agent']['squad-worker']['permission']['edit'],
+                         {'*': 'deny', 'owned.txt': 'allow', 'owned.txt/*': 'allow'})
+        receipt = json.loads((run_dir / 'receipt.json').read_text())
+        self.assertEqual(receipt['provider'], 'space-bunny')
+        self.assertEqual(receipt['model_requested'], BUNNY)
+        self.assertEqual(receipt['effort'], 'max')
 
     def test_grok_argv_env_routing(self):
         ws = make_workspace()
@@ -1520,7 +1564,7 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(W.GROK_MODEL, 'grok-4.7-xhigh')
         self.assertEqual(W.GROK_BUILD_MODEL, 'grok-4.7')
         self.assertEqual(W.MUSE_MODEL, 'opencode-go/muse-spark-1.3-contributor')
-        # legacy grok stays ask-only; trust stays cursor-only; steps stays muse-only
+        # legacy grok stays ask-only; trust stays cursor-only; steps stay OpenCode-only
         ws = make_workspace()
         stubdir = pathlib.Path(tempfile.mkdtemp(prefix='stub-'))
         stub = stubdir / 'cursor-agent'

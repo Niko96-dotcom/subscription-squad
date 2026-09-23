@@ -22,13 +22,14 @@ Scope, architecture decisions, shared contracts, disputed findings, and final ac
 | Operation | First choice | Boundary |
 | --- | --- | --- |
 | Implementation, refactoring, regression-test authoring and repair, code exploration | `muse` (primary implementation route) | Small owned packages. No secrets, private personal records, or excluded material on this route. |
+| Quota-saving alternate implementation or bounded second opinion | `space-bunny` through OpenCode Go (provisional) | Select for a concrete fit, especially a small non-sensitive package when Muse capacity matters. Keep independent review and deterministic checks; do not let it review its own work. Recheck availability and provider terms because the free offer is temporary. |
 | Structured source extraction, comparison tables, bounded log or source triage | `antigravity` ask (provisional extraction route) | Self-contained input packet only. |
 | Alternate implementation slice | `antigravity` work (selected alternate only) | Only for a concrete fit such as workspace-tool fit or an explicitly selected eligible alternate. Every candidate still needs tests and independent review. |
 | Independent code review, contradiction checks, disputed diagnosis | `grok` through Cursor ask (primary review route) | Supply actual diff, surrounding source, acceptance criteria, and check evidence. Use no tools when the packet suffices. |
 | Alternate read-only analysis or review | `grok-build` ask | Select only for an observed transport or account fit. Same model family as Cursor Grok, not extra model diversity. |
 | Native Grok implementation | Off the default path | The runner supports work, but repeated trials cancelled without edits. Retry only as a bounded useful retest with acceptance evidence and stated selection. |
 
-There is no intelligence ranking among these models. A different provider is not automatically approved for sensitive material merely because Muse is unsuitable. Antigravity effort is always `high`, never `xhigh`.
+There is no universal intelligence ranking among these models. A different provider is not automatically approved for sensitive material merely because Muse is unsuitable. Antigravity effort is always `high`, never `xhigh`; Space Bunny uses its advertised `max` variant. See the dated [matched trial](references/space-bunny-evaluation.md) before expanding Space Bunny's role.
 
 ## Safety before dispatch
 

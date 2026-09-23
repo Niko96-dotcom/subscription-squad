@@ -73,6 +73,7 @@ All prompts live outside the target checkout. Every `--run-dir` is fresh
 
 ```bash
 python3 scripts/worker.py --provider muse --check
+python3 scripts/worker.py --provider space-bunny --check
 python3 scripts/worker.py --provider grok --check
 python3 scripts/worker.py --provider grok-build --check
 python3 scripts/worker.py --provider antigravity --check
@@ -95,6 +96,8 @@ python3 scripts/worker.py --provider antigravity --mode work \
 ```
 
 Native Grok Build work remains supported by the runner but is off the default path after repeated cancelled trials without edits; retry only as a bounded useful retest with acceptance evidence — see [SKILL.md](SKILL.md).
+
+Space Bunny Free is a provisional OpenCode Go alternate for bounded work. It uses the advertised `max` reasoning variant and the same ownership and preservation checks as Muse. Its free availability and provider terms are time-limited; see the [matched evaluation](references/space-bunny-evaluation.md) before changing the default route.
 
 **3. Review with Grok** (legacy Cursor, read-only; no `--allow-path`):
 
@@ -142,7 +145,7 @@ Full flag details: `python3 scripts/worker.py --help`,
 - **Small packages, bounded calls.** Default: 1 implementation + 1
   cross-model review, max 2 concurrent workers in separate workspaces,
   6 calls per task including failures, max 2 implementation attempts per package,
-  900 s per call, 60 model steps (Muse-only). Reserve 2 calls for review/repair;
+  900 s per call, 60 model steps (OpenCode routes only). Reserve 2 calls for review/repair;
   state a larger finite budget before dispatch for larger tasks within the authorized scope.
   Grok Build uses fixed `xhigh` reasoning; Antigravity uses fixed `high` effort with
   `gemini-3.8-flash-high` (never `xhigh`). Details in [SKILL.md](SKILL.md).

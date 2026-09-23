@@ -43,4 +43,4 @@ Roles are provisional working defaults, not quality rankings. Quality remains un
 - Native Grok Build: alternate read-only synthesis or review on bounded packets; tool-heavy or large reviews carry latency and timeout risk.
 - Astra: retrieval, source selection, citation verification, reconciliation, integration, and acceptance.
 
-All four worker routes are subscription or account-backed, not guarantees of zero overage; the runner never enables overage or changes billing. Refresh inventories when invoked and stop a route on quota, authentication, or billing errors.
+All worker routes are subscription or account-backed, not guarantees of zero overage; the runner never enables overage or changes billing. Refresh inventories when invoked and stop a route on quota, authentication, or billing errors.
