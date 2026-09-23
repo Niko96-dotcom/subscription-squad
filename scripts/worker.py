@@ -539,14 +539,14 @@ def parse_antigravity_output(data):
 
 def classify_handoff(text, mode, step_count=0, step_budget=None):
     """Transport success is separate from worker-reported delivery and acceptance."""
-    matches = list(re.finditer(r'^SQUAD_STATUS: (complete|partial|blocked|needs_context)[ \t]*$', text, re.M))
-    if matches:
-        text = text[matches[0].start():].strip()
-        status = matches[0].group(1)
-    else:
-        status = 'unreported'
-    capped = step_budget is not None and step_count >= step_budget
-    limit_notice = not matches and bool(re.search(r'^(?:maximum|max) steps.{0,80}(?:reached|exhausted)', text.lstrip(), re.I))
+    text = text.strip()
+    first_line = text.split('\n', 1)[0]
+    match = re.fullmatch(r'SQUAD_STATUS: (complete|partial|blocked|needs_context)[ \t]*', first_line)
+    status = match.group(1) if match else 'unreported'
+    # A terminal stop with an explicit complete handoff can legitimately use
+    # the final allowed step. Interrupted streams are rejected by the parser.
+    capped = step_budget is not None and step_count >= step_budget and status != 'complete'
+    limit_notice = not match and bool(re.search(r'^(?:maximum|max) steps.{0,80}(?:reached|exhausted)', text, re.I))
     if capped or limit_notice:
         status = 'partial'
     return text, status, capped or limit_notice
@@ -583,9 +583,12 @@ def main(argv=None):
     if args.steps is not None and args.provider not in ('muse', 'space-bunny'):
         parser.error('--steps applies only to OpenCode routes')
     step_budget = args.steps if args.steps is not None else 60
-    expected_variant = SPACE_BUNNY_VARIANT if args.provider == 'space-bunny' else 'xhigh'
-    if args.variant is not None and args.variant != expected_variant:
-        parser.error(f'only --variant {expected_variant} is supported for {args.provider}')
+    if args.variant is not None:
+        if args.provider not in ('muse', 'space-bunny'):
+            parser.error('--variant applies only to OpenCode routes')
+        expected_variant = SPACE_BUNNY_VARIANT if args.provider == 'space-bunny' else MUSE_VARIANT
+        if args.variant != expected_variant:
+            parser.error(f'only --variant {expected_variant} is supported for {args.provider}')
     workspace = args.workspace.expanduser().resolve(strict=True)
     if not workspace.is_dir():
         parser.error('workspace must be a directory')
@@ -861,7 +864,7 @@ def main(argv=None):
                         receipt['error'] = receipt.get('error') or 'provider reported error event'
                     else:
                         receipt['error'] = receipt.get('error') or 'empty result from provider'
-                if code == 0 and work_status in ('partial', 'blocked', 'needs_context'):
+                if code == 0 and work_status != 'complete':
                     code, outcome = 4, 'incomplete'
             except OSError as exc:
                 receipt['preservation_error'] = str(exc)

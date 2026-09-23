@@ -37,6 +37,12 @@ binds the cwd as a project, and forces `--sandbox`. Tests need neither provider 
 
 ## Install the skill
 
+Keep one active Codex copy at `~/.codex/skills/subscription-squad`.
+The repository checkout is source, `~/.codex/skill-backups` contains retained
+copies, and `~/.claude/skills` is a separate Claude installation. These are
+not additional active Codex installs. Do not put renamed copies with the same
+skill name under `~/.codex/skills`.
+
 Copy the skill files into your Codex skills directory. The snippet refuses
 an existing destination — including a dangling symlink — and the final
 `mkdir` without `-p` fails on races. Remove or back up the destination

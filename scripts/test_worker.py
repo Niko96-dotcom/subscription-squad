@@ -120,14 +120,14 @@ if len(sys.argv) >= 2 and sys.argv[1] == 'run':
     elif beh == 'empty':
         sys.exit(0)
     elif beh == 'reasoning_mix':
-        print(json.dumps({'type': 'text', 'text': 'keep me'}))
+        print(json.dumps({'type': 'text', 'text': 'SQUAD_STATUS: complete\\nkeep me'}))
         print(json.dumps({'type': 'reasoning', 'text': 'drop me'}))
         print(json.dumps({'type': 'tool_use', 'text': 'drop me too'}))
         sys.exit(0)
     elif beh == 'edit_owned':
         p = pathlib.Path(ws) / 'owned.txt'
         p.write_text(p.read_text() + '\\nedited')
-        print(json.dumps({'type': 'text', 'text': 'edited owned'}))
+        print(json.dumps({'type': 'text', 'text': 'SQUAD_STATUS: complete\\nedited owned'}))
         sys.exit(0)
     elif beh == 'edit_outside':
         p = pathlib.Path(ws) / 'other.txt'
@@ -148,7 +148,7 @@ if len(sys.argv) >= 2 and sys.argv[1] == 'run':
         sys.exit(0)
     else:
         selected = json.loads(os.environ.get('OPENCODE_CONFIG_CONTENT', '{}')).get('model')
-        print(json.dumps({'type': 'text', 'text': 'hello candidate', 'sessionID': 'ses_1', 'model': selected}))
+        print(json.dumps({'type': 'text', 'text': 'SQUAD_STATUS: complete\\nhello candidate', 'sessionID': 'ses_1', 'model': selected}))
         sys.exit(0)
 print('unexpected muse stub', file=sys.stderr)
 sys.exit(2)
@@ -202,7 +202,7 @@ if '--print' in sys.argv:
         print(json.dumps({'type': 'result', 'subtype': 'success', 'result': 'bad edit', 'is_error': False}))
         sys.exit(0)
     else:
-        print(json.dumps({'type': 'result', 'subtype': 'success', 'result': 'grok ok', 'is_error': False, 'model': 'grok-4.7-xhigh', 'sessionID': 'ses_g'}))
+        print(json.dumps({'type': 'result', 'subtype': 'success', 'result': 'SQUAD_STATUS: complete\\ngrok ok', 'is_error': False, 'model': 'grok-4.7-xhigh', 'sessionID': 'ses_g'}))
         sys.exit(0)
 print('unexpected cursor stub', file=sys.stderr)
 sys.exit(2)
@@ -251,7 +251,7 @@ if '--single' in sys.argv:
         print(json.dumps({'text': 'hi', 'stopReason': 'stop', 'error': 'boom', 'modelUsage': 'grok-4.6-build'}))
         sys.exit(0)
     else:
-        print(json.dumps({'text': 'grok build ok', 'stopReason': 'stop', 'sessionId': 'ses_gb', 'requestId': 'req_gb', 'thought': 'reasoning', 'usage': {'input': 10}, 'num_turns': 1, 'total_cost_usd': 0.02, 'modelUsage': 'grok-4.6-build'}))
+        print(json.dumps({'text': 'SQUAD_STATUS: complete\\ngrok build ok', 'stopReason': 'stop', 'sessionId': 'ses_gb', 'requestId': 'req_gb', 'thought': 'reasoning', 'usage': {'input': 10}, 'num_turns': 1, 'total_cost_usd': 0.02, 'modelUsage': 'grok-4.6-build'}))
         sys.exit(0)
 print('unexpected grok-build stub', file=sys.stderr)
 sys.exit(2)
@@ -295,7 +295,7 @@ if any(a.startswith('--print=') for a in sys.argv):
         print('not json')
         sys.exit(0)
     else:
-        print(json.dumps({'conversation_id': 'conv_ok', 'status': 'SUCCESS', 'response': 'agy ok', 'duration_seconds': 2, 'num_turns': 1, 'usage': {'input': 7}, 'denied_actions': []}))
+        print(json.dumps({'conversation_id': 'conv_ok', 'status': 'SUCCESS', 'response': 'SQUAD_STATUS: complete\\nagy ok', 'duration_seconds': 2, 'num_turns': 1, 'usage': {'input': 7}, 'denied_actions': []}))
         sys.exit(0)
 print('unexpected agy stub', file=sys.stderr)
 sys.exit(2)
@@ -491,6 +491,11 @@ class WorkerTests(unittest.TestCase):
         r = invoke(['--workspace', str(ws), '--provider', 'muse', '--variant', 'low', '--check'],
                    env_extra={'SUBSCRIPTION_SQUAD_OPENCODE_BIN': str(stub)})
         self.assertNotEqual(r.returncode, 0)
+        for provider in ('grok', 'grok-build', 'antigravity'):
+            result = invoke(['--workspace', str(ws), '--provider', provider,
+                             '--variant', 'xhigh', '--check'])
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('applies only to OpenCode', result.stderr.decode())
 
     def test_grok_work_rejected(self):
         ws = make_workspace()
@@ -725,11 +730,16 @@ class WorkerTests(unittest.TestCase):
     def test_step_budget_and_partial_delivery(self):
         self.assertEqual(W.build_opencode_config('ask', [], 75)['agent']['squad-worker']['steps'],75)
         for label in ('complete','partial','blocked','needs_context'):
-            text,status,capped=W.classify_handoff('progress\nSQUAD_STATUS: '+label+'\nFiles: none','work',3,60)
+            text,status,capped=W.classify_handoff('SQUAD_STATUS: '+label+'\nFiles: none','work',3,60)
             self.assertTrue(text.startswith('SQUAD_STATUS:'))
             self.assertEqual(status,label)
             self.assertFalse(capped)
-        self.assertEqual(W.classify_handoff('SQUAD_STATUS: complete','work',30,30)[1:],('partial',True))
+        text,status,capped=W.classify_handoff('progress\nSQUAD_STATUS: complete\nFiles: none','work',3,60)
+        self.assertEqual(status,'unreported')
+        self.assertEqual(text,'progress\nSQUAD_STATUS: complete\nFiles: none')
+        self.assertFalse(capped)
+        self.assertEqual(W.classify_handoff('SQUAD_STATUS: complete','work',30,30)[1:],('complete',False))
+        self.assertEqual(W.classify_handoff('progress','work',30,30)[1:],('partial',True))
         self.assertEqual(W.classify_handoff('Maximum steps for this agent have been reached.','work')[1],'partial')
         self.assertEqual(W.classify_handoff('SQUAD_STATUS: partial\nremaining test','work')[1],'partial')
         self.assertEqual(W.classify_handoff('SQUAD_STATUS: complete\nHistorical maximum steps reached in prior run','ask')[1],'complete')
@@ -767,14 +777,14 @@ class WorkerTests(unittest.TestCase):
                 run=stubdir/'run'
                 result=invoke(['--workspace',str(ws),'--provider','muse','--steps','5','--run-dir',str(run),'deliver'],
                               {'SUBSCRIPTION_SQUAD_OPENCODE_BIN':str(stub)})
-                self.assertEqual(result.returncode,1 if failure else 4,result.stderr.decode())
+                self.assertEqual(result.returncode,1 if failure else 0,result.stderr.decode())
                 receipt=json.loads((run/'receipt.json').read_text())
-                self.assertEqual(receipt['work_status'],'partial')
-                self.assertEqual(receipt['status'],'worker_failed' if failure else 'incomplete')
+                self.assertEqual(receipt['work_status'],'complete')
+                self.assertEqual(receipt['status'],'worker_failed' if failure else 'candidate')
 
     def test_incomplete_run_exit_code_and_receipt(self):
         ws=make_workspace(); stubdir=pathlib.Path(tempfile.mkdtemp(prefix='stub-')); stub=stubdir/'opencode'
-        write_stub(stub,MUSE_STUB.replace('hello candidate','SQUAD_STATUS: partial'))
+        write_stub(stub,MUSE_STUB.replace('SQUAD_STATUS: complete\\nhello candidate','SQUAD_STATUS: partial'))
         run=stubdir/'run'
         result=invoke(['--workspace',str(ws),'--provider','muse','--steps','45','--run-dir',str(run),'finish'],
                       {'SUBSCRIPTION_SQUAD_OPENCODE_BIN':str(stub)})
@@ -784,6 +794,22 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(receipt['work_status'],'partial')
         self.assertEqual(receipt['step_budget'],45)
         self.assertTrue(receipt['protected_content_unchanged'])
+
+    def test_missing_or_embedded_handoff_is_incomplete(self):
+        for response in ('hello candidate', 'progress\\nSQUAD_STATUS: complete'):
+            with self.subTest(response=response):
+                ws=make_workspace(); stubdir=pathlib.Path(tempfile.mkdtemp(prefix='stub-'))
+                stub=stubdir/'opencode'
+                write_stub(stub,MUSE_STUB.replace('SQUAD_STATUS: complete\\nhello candidate', response))
+                run=stubdir/'run'
+                result=invoke(['--workspace',str(ws),'--provider','muse','--run-dir',str(run),'deliver'],
+                              {'SUBSCRIPTION_SQUAD_OPENCODE_BIN':str(stub)})
+                self.assertEqual(result.returncode,4,result.stderr.decode())
+                receipt=json.loads((run/'receipt.json').read_text())
+                self.assertEqual(receipt['status'],'incomplete')
+                self.assertEqual(receipt['work_status'],'unreported')
+                self.assertIn('hello candidate' if response == 'hello candidate' else 'progress',
+                              (run/'result.txt').read_text())
 
     def test_nested_workspace_rejected(self):
         ws=make_workspace(); nested=ws/'nested'; nested.mkdir()
