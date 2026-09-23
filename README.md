@@ -67,6 +67,14 @@ Invoke in Codex with the skill name, for example:
 $subscription-squad implement <owned paths> per SKILL.md with a frozen brief
 ```
 
+For other agent CLIs, install [the portable entrypoint](adapters/portable/SKILL.md)
+as `SKILL.md` in that CLI's personal `skills/subscription-squad` directory,
+alongside exact copies of this repository's `scripts/` and `references/`.
+The portable entrypoint is explicit-use and prevents a worker launched by the
+runner from dispatching another worker. Claude Code may instead retain its
+own coordinator and relay adapter while syncing the shared scripts and
+references; do not overwrite a host-specific entrypoint with Codex wording.
+
 See [SKILL.md](SKILL.md) for when to invoke, budgets, preflight,
 and brief/collect rules.
 
