@@ -94,7 +94,7 @@ def find_arg(flag):
         if i+1 < len(a):
             return a[i+1]
     return None
-if len(sys.argv) >= 2 and sys.argv[1] == 'models':
+if 'models' in sys.argv:
     mode = os.environ.get('STUB_INVENTORY_MODE', 'ok')
     selected = json.loads(os.environ.get('OPENCODE_CONFIG_CONTENT', '{}')).get('model')
     model_id = 'space-bunny-free' if selected == 'opencode-go/space-bunny-free' else 'muse-spark-1.3-contributor'
@@ -202,6 +202,7 @@ if '--print' in sys.argv:
         print(json.dumps({'type': 'result', 'subtype': 'success', 'result': 'bad edit', 'is_error': False}))
         sys.exit(0)
     else:
+        print(json.dumps({'type': 'assistant', 'message': {'role': 'assistant', 'content': [{'type': 'text', 'text': 'SQUAD_STATUS: complete\\ngrok ok'}]}, 'session_id': 'ses_g'}))
         print(json.dumps({'type': 'result', 'subtype': 'success', 'result': 'SQUAD_STATUS: complete\\ngrok ok', 'is_error': False, 'model': 'grok-4.7-xhigh', 'sessionID': 'ses_g'}))
         sys.exit(0)
 print('unexpected cursor stub', file=sys.stderr)
@@ -465,7 +466,7 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, msg=r.stderr.decode()[:2000] + r.stdout.decode()[:2000])
         argv = json.loads(argv_file.read_text())
         self.assertIn('--print', argv)
-        self.assertEqual(argv[argv.index('--output-format') + 1], 'json')
+        self.assertEqual(argv[argv.index('--output-format') + 1], 'stream-json')
         self.assertIn('--workspace', argv)
         self.assertIn(str(ws.resolve()), argv)
         self.assertIn('--model', argv)
@@ -735,8 +736,8 @@ class WorkerTests(unittest.TestCase):
             self.assertEqual(status,label)
             self.assertFalse(capped)
         text,status,capped=W.classify_handoff('progress\nSQUAD_STATUS: complete\nFiles: none','work',3,60)
-        self.assertEqual(status,'unreported')
-        self.assertEqual(text,'progress\nSQUAD_STATUS: complete\nFiles: none')
+        self.assertEqual(status,'complete')
+        self.assertEqual(text,'SQUAD_STATUS: complete\nFiles: none')
         self.assertFalse(capped)
         self.assertEqual(W.classify_handoff('SQUAD_STATUS: complete','work',30,30)[1:],('complete',False))
         self.assertEqual(W.classify_handoff('progress','work',30,30)[1:],('partial',True))
@@ -796,20 +797,134 @@ class WorkerTests(unittest.TestCase):
         self.assertTrue(receipt['protected_content_unchanged'])
 
     def test_missing_or_embedded_handoff_is_incomplete(self):
-        for response in ('hello candidate', 'progress\\nSQUAD_STATUS: complete'):
-            with self.subTest(response=response):
-                ws=make_workspace(); stubdir=pathlib.Path(tempfile.mkdtemp(prefix='stub-'))
-                stub=stubdir/'opencode'
-                write_stub(stub,MUSE_STUB.replace('SQUAD_STATUS: complete\\nhello candidate', response))
-                run=stubdir/'run'
-                result=invoke(['--workspace',str(ws),'--provider','muse','--run-dir',str(run),'deliver'],
-                              {'SUBSCRIPTION_SQUAD_OPENCODE_BIN':str(stub)})
-                self.assertEqual(result.returncode,4,result.stderr.decode())
-                receipt=json.loads((run/'receipt.json').read_text())
-                self.assertEqual(receipt['status'],'incomplete')
-                self.assertEqual(receipt['work_status'],'unreported')
-                self.assertIn('hello candidate' if response == 'hello candidate' else 'progress',
-                              (run/'result.txt').read_text())
+        ws=make_workspace(); stubdir=pathlib.Path(tempfile.mkdtemp(prefix='stub-'))
+        stub=stubdir/'opencode'
+        write_stub(stub,MUSE_STUB.replace('SQUAD_STATUS: complete\\nhello candidate', 'hello candidate'))
+        run=stubdir/'run'
+        result=invoke(['--workspace',str(ws),'--provider','muse','--run-dir',str(run),'deliver'],
+                      {'SUBSCRIPTION_SQUAD_OPENCODE_BIN':str(stub)})
+        self.assertEqual(result.returncode,4,result.stderr.decode())
+        receipt=json.loads((run/'receipt.json').read_text())
+        self.assertEqual(receipt['status'],'incomplete')
+        self.assertEqual(receipt['work_status'],'unreported')
+        self.assertIn('hello candidate', (run/'result.txt').read_text())
+
+    def test_preamble_handoff_is_complete(self):
+        ws=make_workspace(); stubdir=pathlib.Path(tempfile.mkdtemp(prefix='stub-'))
+        stub=stubdir/'opencode'
+        write_stub(stub,MUSE_STUB.replace('SQUAD_STATUS: complete\\nhello candidate', 'progress\\nSQUAD_STATUS: complete\\nhello candidate'))
+        run=stubdir/'run'
+        result=invoke(['--workspace',str(ws),'--provider','muse','--run-dir',str(run),'deliver'],
+                      {'SUBSCRIPTION_SQUAD_OPENCODE_BIN':str(stub)})
+        self.assertEqual(result.returncode,0,result.stderr.decode()+result.stdout.decode())
+        receipt=json.loads((run/'receipt.json').read_text())
+        self.assertEqual(receipt['status'],'candidate')
+        self.assertEqual(receipt['work_status'],'complete')
+        self.assertTrue((run/'result.txt').read_text().startswith('SQUAD_STATUS: complete'))
+        self.assertEqual(receipt.get('handoff_preamble'),'progress')
+
+    def test_handoff_marker_tolerance_real_shapes(self):
+        glued="I'll read the first three lines of `musichub.squad.txt`.SQUAD_STATUS: complete\n[21:17:40]"
+        text,status,_=W.classify_handoff(glued,'ask')
+        self.assertEqual(status,'complete')
+        self.assertTrue(text.startswith('SQUAD_STATUS: complete'))
+        pre,hand=W.split_handoff(glued)
+        self.assertTrue(hand.startswith('SQUAD_STATUS: complete'))
+        body="I have launched the tests and will wait.\nI have triggered the scripts.\nSQUAD_STATUS: complete\n\n### Verdict\n...\nSQUAD_STATUS: complete\n\nAll checks done."
+        text2,status2,_=W.classify_handoff(body,'ask')
+        self.assertEqual(status2,'complete')
+        self.assertTrue(text2.startswith('SQUAD_STATUS: complete'))
+        self.assertIn('SQUAD_STATUS: complete', text2[len('SQUAD_STATUS: complete'):])
+        self.assertEqual(W.classify_handoff('SQUAD_STATUS: complete\nFound defects...\nSQUAD_STATUS: partial','ask')[1],'complete')
+
+    def test_handoff_non_qualifying(self):
+        for bad in ('hello candidate', 'The brief asks for SQUAD_STATUS: complete here', '`SQUAD_STATUS: complete`', 'SQUAD_STATUS: complete and more', 'SQUAD_STATUS: done'):
+            with self.subTest(bad=bad):
+                text,status,_=W.classify_handoff(bad,'ask')
+                self.assertEqual(status,'unreported')
+                self.assertEqual(text,bad.strip())
+
+    def test_handoff_crlf_normalized(self):
+        text,status,_=W.classify_handoff('progress\r\nSQUAD_STATUS: complete\r\nverdict','ask')
+        self.assertEqual(status,'complete')
+        self.assertTrue(text.startswith('SQUAD_STATUS: complete'))
+        self.assertNotIn('\r',text)
+        pre,hand=W.split_handoff('progress\r\nSQUAD_STATUS: complete\r\nverdict')
+        self.assertEqual(pre,'progress')
+        self.assertTrue(hand.startswith('SQUAD_STATUS: complete'))
+        self.assertNotIn('\r',hand)
+        text2,status2,_=W.classify_handoff('SQUAD_STATUS: complete\r\nverdict','ask')
+        self.assertEqual(status2,'complete')
+        self.assertTrue(text2.startswith('SQUAD_STATUS: complete'))
+        self.assertNotIn('\r',text2)
+        text3,status3,_=W.classify_handoff('progress\rSQUAD_STATUS: complete\rverdict','ask')
+        self.assertEqual(status3,'complete')
+        self.assertTrue(text3.startswith('SQUAD_STATUS: complete'))
+        self.assertNotIn('\r',text3)
+
+    def test_unreported_records_no_preamble(self):
+        ws=make_workspace(); stubdir=pathlib.Path(tempfile.mkdtemp(prefix='stub-')); stub=stubdir/'opencode'
+        write_stub(stub,MUSE_STUB.replace('SQUAD_STATUS: complete\\nhello candidate','hello candidate'))
+        run=stubdir/'run-unreported'
+        result=invoke(['--workspace',str(ws),'--provider','muse','--run-dir',str(run),'deliver'],
+                      {'SUBSCRIPTION_SQUAD_OPENCODE_BIN':str(stub)})
+        self.assertEqual(result.returncode,4,result.stderr.decode())
+        receipt=json.loads((run/'receipt.json').read_text())
+        self.assertEqual(receipt['work_status'],'unreported')
+        self.assertNotIn('handoff_preamble',receipt)
+
+    def test_handoff_preamble_is_bounded(self):
+        quoted='I could not finish the review. '+'Details follow. '*40+'\nExpected format:\nSQUAD_STATUS: complete\nFindings: none'
+        self.assertGreater(quoted.index('SQUAD_STATUS'),W.HANDOFF_PREAMBLE_LIMIT)
+        self.assertEqual(W.classify_handoff(quoted,'ask')[1],'unreported')
+        self.assertEqual(W.split_handoff(quoted),('',quoted.strip()))
+        near='x'*(W.HANDOFF_PREAMBLE_LIMIT-1)+'.SQUAD_STATUS: partial\nleft'
+        self.assertEqual(W.classify_handoff(near,'ask')[:2],('SQUAD_STATUS: partial\nleft','partial'))
+
+    def test_parse_grok_stream_sample(self):
+        sid='S'
+        lines=[
+            json.dumps({'type':'system','subtype':'init','session_id':sid,'model':'Grok 4.7 256K Extra High','permissionMode':'default'}),
+            json.dumps({'type':'user','message':{'role':'user','content':[{'type':'text','text':'...prompt...'}]},'session_id':sid}),
+            json.dumps({'type':'thinking','subtype':'delta','text':'I will read','session_id':sid}),
+            json.dumps({'type':'thinking','subtype':'completed','session_id':sid}),
+            json.dumps({'type':'assistant','message':{'role':'assistant','content':[{'type':'text','text':"I'll read the first three lines of `musichub.squad.txt`."}]},'session_id':sid,'model_call_id':'M'}),
+            json.dumps({'type':'tool_call','subtype':'started','call_id':'C1','tool_call':{'readToolCall':{'args':{'path':'/x'}}},'session_id':sid}),
+            json.dumps({'type':'tool_call','subtype':'completed','call_id':'C1','tool_call':{'readToolCall':{'args':{'path':'/x'},'result':{}}},'session_id':sid}),
+            json.dumps({'type':'assistant','message':{'role':'assistant','content':[{'type':'text','text':'SQUAD_STATUS: complete\n[21:17:40]'}]},'session_id':sid}),
+            json.dumps({'type':'result','subtype':'success','duration_ms':50867,'is_error':False,'result':"I'll read the first three lines of `musichub.squad.txt`.SQUAD_STATUS: complete\n[21:17:40]",'session_id':sid,'request_id':'R','usage':{'inputTokens':1}}),
+        ]
+        text,meta,err=W.parse_grok_output('\n'.join(lines).encode())
+        self.assertFalse(err)
+        self.assertEqual(text,'SQUAD_STATUS: complete\n[21:17:40]')
+        self.assertEqual(meta.get('session_id'),sid)
+        self.assertNotIn('Grok 4.7 256K Extra High', json.dumps(meta))
+
+    def test_parse_grok_stream_truncated_and_error(self):
+        base=[
+            json.dumps({'type':'assistant','message':{'role':'assistant','content':[{'type':'text','text':'partial work'}]}}),
+            json.dumps({'type':'tool_call','call_id':'C1'}),
+            json.dumps({'type':'assistant','message':{'role':'assistant','content':[{'type':'text','text':'SQUAD_STATUS: partial\nsalvaged'}]}}),
+        ]
+        text,_,err=W.parse_grok_output('\n'.join(base).encode())
+        self.assertTrue(err)
+        self.assertEqual(text,'SQUAD_STATUS: partial\nsalvaged')
+        bad=json.dumps({'type':'assistant','message':{'role':'assistant','content':[{'type':'text','text':'hi'}]}})+'\n'+json.dumps({'type':'error','error':'boom'})
+        _,_,err2=W.parse_grok_output(bad.encode())
+        self.assertTrue(err2)
+
+    def test_opencode_preflight_uses_pure(self):
+        for prov in ('muse','space-bunny'):
+            with self.subTest(provider=prov):
+                ws=make_workspace(); stubdir=pathlib.Path(tempfile.mkdtemp(prefix='stub-')); stub=stubdir/'opencode'
+                write_stub(stub,MUSE_STUB)
+                argv_file=stubdir/'argv.json'
+                r=invoke(['--workspace',str(ws),'--provider',prov,'--check'],
+                         env_extra={'SUBSCRIPTION_SQUAD_OPENCODE_BIN':str(stub),'STUB_ARGV_FILE':str(argv_file)})
+                self.assertEqual(r.returncode,0,msg=r.stderr.decode()[:1000])
+                argv=json.loads(argv_file.read_text())
+                self.assertIn('--pure',argv)
+                self.assertIn('models',argv)
 
     def test_nested_workspace_rejected(self):
         ws=make_workspace(); nested=ws/'nested'; nested.mkdir()

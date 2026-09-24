@@ -118,15 +118,14 @@ Space Bunny Free is a provisional OpenCode Go alternate for bounded work. It use
 ```bash
 python3 scripts/worker.py --provider grok --mode ask \
   --workspace /ABSOLUTE/checkout --trust \
-  --prompt-file /ABSOLUTE/prompts/review.txt --run-dir /ABSOLUTE/task-runs/review-1 --timeout 600
+  --prompt-file /ABSOLUTE/prompts/review.txt --run-dir /ABSOLUTE/task-runs/review-1 --timeout 1200
 ```
 
-Native review alternatives (read-only ask uses `plan`; no `--trust`):
+Alternate review (read-only ask uses `plan`; no `--trust`). Native
+`grok-build` ask stays in the runner but is off the default path after
+repeated timeouts; see [routes](references/routes.md).
 
 ```bash
-python3 scripts/worker.py --provider grok-build --mode ask \
-  --workspace /ABSOLUTE/checkout \
-  --prompt-file /ABSOLUTE/prompts/review.txt --run-dir /ABSOLUTE/task-runs/review-gb-1 --timeout 600
 python3 scripts/worker.py --provider antigravity --mode ask \
   --workspace /ABSOLUTE/checkout \
   --prompt-file /ABSOLUTE/prompts/review.txt --run-dir /ABSOLUTE/task-runs/review-agy-1 --timeout 600
@@ -136,10 +135,10 @@ Pass `--trust` only for an already authorized/trusted workspace or a
 fixture you created. See [examples/](examples/) for brief shapes.
 
 **4. Collect** (state file outside every run dir; repeat until
-`new_results` is empty):
+`new_results` is empty; `--wait` blocks until a result is ready instead of polling):
 
 ```bash
-python3 scripts/collect.py /ABSOLUTE/task-runs --state /ABSOLUTE/collection-state.json
+python3 scripts/collect.py /ABSOLUTE/task-runs --state /ABSOLUTE/collection-state.json --wait 600
 ```
 
 **5. Accept (Astra, not a worker).** `candidate` means transport and
@@ -159,7 +158,7 @@ Full flag details: `python3 scripts/worker.py --help`,
 - **Small packages, bounded calls.** Default: 1 implementation + 1
   cross-model review, max 2 concurrent workers in separate workspaces,
   6 calls per task including failures, max 2 implementation attempts per package,
-  900 s per call, 60 model steps (OpenCode routes only). Reserve 2 calls for review/repair;
+  900 s per call (1200 s for Cursor Grok reviews), 60 model steps (OpenCode routes only). Reserve 2 calls for review/repair;
   state a larger finite budget before dispatch for larger tasks within the authorized scope.
   Grok Build uses fixed `xhigh` reasoning; Antigravity uses fixed `high` effort with
   `gemini-3.8-flash-high` (never `xhigh`). Details in [SKILL.md](SKILL.md).

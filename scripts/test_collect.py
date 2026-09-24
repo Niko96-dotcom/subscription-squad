@@ -7,16 +7,24 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
 COLLECT = Path(__file__).with_name("collect.py")
 
 
-def run_collect(run_root, state_file, max_chars=None):
+def run_collect(run_root, state_file, max_chars=None, wait=None, poll=None, max_new_results=None):
     cmd = [sys.executable, str(COLLECT), str(run_root), "--state", str(state_file)]
     if max_chars is not None:
         cmd += ["--max-result-chars", str(max_chars)]
+    if wait is not None:
+        cmd += ["--wait", str(wait)]
+    if poll is not None:
+        cmd += ["--poll", str(poll)]
+    if max_new_results is not None:
+        cmd += ["--max-new-results", str(max_new_results)]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     data = None
     out = (proc.stdout or "").strip()
@@ -325,6 +333,107 @@ class CollectTests(unittest.TestCase):
             self.assertEqual((d / "receipt.json").read_bytes(), receipt_before)
             self.assertEqual((d / "result.txt").read_bytes(), result_before)
             self.assertFalse(bad_state.is_file())
+
+    def test_wait_returns_promptly_with_terminal_undelivered(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td)/'runs';root.mkdir();state=Path(td)/'state.json'
+            write_run(root,'a',result_text='ready')
+            t0=time.monotonic()
+            proc,data=run_collect(root,state,wait=5,poll=0.05)
+            el=time.monotonic()-t0
+            self.assertEqual(proc.returncode,0,proc.stderr)
+            self.assertEqual(len(data['new_results']),1)
+            self.assertIn('waited_seconds',data)
+            self.assertIn('wait_timed_out',data)
+            self.assertIs(data['wait_timed_out'],False)
+            self.assertIsInstance(data['waited_seconds'],float)
+            self.assertEqual(data['waited_seconds'],round(data['waited_seconds'],3))
+            self.assertLess(el,2.0)
+            self.assertLess(data['waited_seconds'],2.0)
+
+    def test_wait_timeout_with_only_running(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td)/'runs';root.mkdir();state=Path(td)/'state.json'
+            write_run(root,'r1',status='running',result_text=None,result_sha_override=None,write_result=False)
+            t0=time.monotonic()
+            proc,data=run_collect(root,state,wait=0.3,poll=0.05)
+            el=time.monotonic()-t0
+            self.assertEqual(proc.returncode,0,proc.stderr)
+            self.assertEqual(data['new_results'],[])
+            self.assertIs(data['wait_timed_out'],True)
+            self.assertIsInstance(data['waited_seconds'],float)
+            self.assertGreaterEqual(el,0.2)
+            self.assertLess(el,2.0)
+            self.assertGreaterEqual(data['waited_seconds'],0.2)
+
+    def test_wait_poll_larger_than_wait_does_not_oversleep(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td)/'runs';root.mkdir();state=Path(td)/'state.json'
+            write_run(root,'r1',status='running',result_text=None,result_sha_override=None,write_result=False)
+            t0=time.monotonic()
+            proc,data=run_collect(root,state,wait=0.3,poll=60)
+            el=time.monotonic()-t0
+            self.assertEqual(proc.returncode,0,proc.stderr)
+            self.assertEqual(data['new_results'],[])
+            self.assertIs(data['wait_timed_out'],True)
+            self.assertIsInstance(data['waited_seconds'],float)
+            self.assertLess(el,5.0)
+            self.assertLessEqual(data['waited_seconds'],0.3+1.0)
+
+    def test_wait_delivers_run_becoming_terminal(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td)/'runs';root.mkdir();state=Path(td)/'state.json'
+            write_run(root,'r1',status='running',result_text=None,result_sha_override=None,write_result=False)
+            def flip():
+                time.sleep(0.15)
+                write_run(root,'r1',status='candidate',result_text='now done')
+            th=threading.Thread(target=flip)
+            th.start()
+            try:
+                t0=time.monotonic()
+                proc,data=run_collect(root,state,wait=2,poll=0.05)
+                el=time.monotonic()-t0
+            finally:
+                th.join(timeout=5)
+            self.assertEqual(proc.returncode,0,proc.stderr)
+            self.assertEqual(len(data['new_results']),1)
+            self.assertEqual(data['new_results'][0]['name'],'r1')
+            self.assertIs(data['wait_timed_out'],False)
+            self.assertIsInstance(data['waited_seconds'],float)
+            self.assertLess(el,1.5)
+
+    def test_wait_all_delivered_returns_immediately(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td)/'runs';root.mkdir();state=Path(td)/'state.json'
+            write_run(root,'a',result_text='hi')
+            _,d1=run_collect(root,state)
+            self.assertEqual(len(d1['new_results']),1)
+            t0=time.monotonic()
+            proc,data=run_collect(root,state,wait=2,poll=0.05)
+            el=time.monotonic()-t0
+            self.assertEqual(proc.returncode,0,proc.stderr)
+            self.assertEqual(data['new_results'],[])
+            self.assertIs(data['wait_timed_out'],False)
+            self.assertIn('waited_seconds',data)
+            self.assertLess(el,1.5)
+
+    def test_no_wait_has_no_wait_keys(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td)/'runs';root.mkdir();state=Path(td)/'state.json'
+            write_run(root,'a',result_text='hi')
+            proc,data=run_collect(root,state)
+            self.assertEqual(proc.returncode,0,proc.stderr)
+            self.assertNotIn('waited_seconds',data)
+            self.assertNotIn('wait_timed_out',data)
+
+    def test_invalid_wait_poll_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td)/'runs';root.mkdir();state=Path(td)/'state.json'
+            write_run(root,'a',result_text='hi')
+            for extra in (['--wait','-1'],['--wait','4000'],['--poll','0']):
+                cmd=[sys.executable,str(COLLECT),str(root),'--state',str(state)]+extra
+                proc=subprocess.run(cmd,capture_output=True,text=True,timeout=30)
+                self.assertNotEqual(proc.returncode,0,extra)
 
 
 if __name__ == "__main__":

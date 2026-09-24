@@ -472,17 +472,49 @@ def parse_muse_output(data):
 
 def parse_grok_output(data):
     text = data.decode(errors='replace') if isinstance(data, bytes) else data
-    try:
-        obj = json.loads(text)
-    except ValueError:
-        return '', {}, True
-    if not isinstance(obj, dict) or obj.get('type') != 'result':
-        return '', {}, True
-    meta = {k: obj[k] for k in ('session_id', 'sessionID', 'sessionId', 'usage', 'model', 'request_id') if k in obj}
-    result = obj.get('result', '')
-    if not isinstance(result, str):
-        result = ''
-    return result.strip(), meta, bool(obj.get('is_error') or obj.get('error') or obj.get('subtype') != 'success' or not result.strip())
+    after, last_any, seen = [], None, False
+    result_obj, saw_error = None, False
+    for line in text.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if event.get('type') == 'error' or event.get('is_error') or event.get('error'):
+            saw_error = True
+        etype = event.get('type')
+        if etype == 'tool_call':
+            after = []
+        elif etype == 'assistant':
+            msg = event.get('message')
+            content = msg.get('content') if isinstance(msg, dict) else None
+            if isinstance(content, list):
+                parts = [item.get('text') for item in content if isinstance(item, dict) and item.get('type') == 'text' and isinstance(item.get('text'), str) and item.get('text')]
+                if parts:
+                    seg = ''.join(parts)
+                    after.append(seg)
+                    last_any = seg
+                    seen = True
+        elif etype == 'result':
+            result_obj = event
+    if after:
+        handoff = '\n'.join(after)
+    elif seen:
+        handoff = last_any if isinstance(last_any, str) else ''
+    elif isinstance(result_obj, dict):
+        handoff = result_obj.get('result', '')
+        if not isinstance(handoff, str):
+            handoff = ''
+    else:
+        handoff = ''
+    handoff = handoff.strip()
+    meta = {k: result_obj[k] for k in ('session_id', 'sessionID', 'sessionId', 'usage', 'model', 'request_id') if isinstance(result_obj, dict) and k in result_obj}
+    if not isinstance(result_obj, dict):
+        return handoff, meta, True
+    if saw_error or result_obj.get('subtype') != 'success' or not handoff:
+        return handoff, meta, True
+    return handoff, meta, False
 
 
 def parse_grok_build_output(data):
@@ -537,19 +569,40 @@ def parse_antigravity_output(data):
     return result, meta, False
 
 
+_HANDOFF_RE = re.compile(r'(?:\A|\n|[.!?][ \t]*)(SQUAD_STATUS: (complete|partial|blocked|needs_context)[ \t]*(?=\r?\n|\Z))')
+
+
+HANDOFF_PREAMBLE_LIMIT = 600  # Real provider narration is one or two sentences; a marker deep in the text is a quote, not a handoff.
+
+
+def split_handoff(text):
+    s = text.replace('\r\n', '\n').replace('\r', '\n').strip()
+    m = _HANDOFF_RE.search(s)
+    if not m or m.start(1) > HANDOFF_PREAMBLE_LIMIT:
+        return ('', s)
+    return (s[:m.start(1)].strip(), s[m.start(1):].strip())
+
+
 def classify_handoff(text, mode, step_count=0, step_budget=None):
     """Transport success is separate from worker-reported delivery and acceptance."""
-    text = text.strip()
-    first_line = text.split('\n', 1)[0]
-    match = re.fullmatch(r'SQUAD_STATUS: (complete|partial|blocked|needs_context)[ \t]*', first_line)
-    status = match.group(1) if match else 'unreported'
+    original = text.replace('\r\n', '\n').replace('\r', '\n').strip()
+    preamble, handoff = split_handoff(original)
+    first = handoff.split('\n', 1)[0] if handoff else ''
+    match = re.fullmatch(r'SQUAD_STATUS: (complete|partial|blocked|needs_context)[ \t]*', first)
+    if match:
+        status = match.group(1)
+        ret = handoff
+    else:
+        status = 'unreported'
+        ret = original
+        match = None
     # A terminal stop with an explicit complete handoff can legitimately use
     # the final allowed step. Interrupted streams are rejected by the parser.
     capped = step_budget is not None and step_count >= step_budget and status != 'complete'
-    limit_notice = not match and bool(re.search(r'^(?:maximum|max) steps.{0,80}(?:reached|exhausted)', text, re.I))
+    limit_notice = not match and bool(re.search(r'^(?:maximum|max) steps.{0,80}(?:reached|exhausted)', original, re.I))
     if capped or limit_notice:
         status = 'partial'
-    return text, status, capped or limit_notice
+    return ret, status, capped or limit_notice
 
 
 def lock_path_for(workspace):
@@ -641,7 +694,7 @@ def main(argv=None):
         if args.check:
             check_env = sanitized_provider_env()
             check_env['OPENCODE_CONFIG_CONTENT'] = json.dumps(build_opencode_config('ask', [], step_budget, model_requested))
-            raw = preflight([opencode_bin, 'models', 'opencode-go', '--verbose'], min(args.timeout, 30), env=check_env)
+            raw = preflight([opencode_bin, '--pure', 'models', 'opencode-go', '--verbose'], min(args.timeout, 30), env=check_env)
             if not opencode_inventory_ok(raw, model_requested, provider_variant):
                 raise ValueError(f'exact OpenCode model variant is not available: {model_requested} variant {provider_variant}')
             print(f'subscription_squad_check=ok provider={provider} model={model_requested} variant={provider_variant} bin={opencode_bin}')
@@ -751,7 +804,7 @@ def main(argv=None):
             child_env['OPENCODE_CONFIG_CONTENT'] = json.dumps(build_opencode_config(args.mode, owned, step_budget, model_requested))
             child_cwd = None
         elif provider == 'grok':
-            command = cursor_base_argv(cursor_bin) + ['--print', '--output-format', 'json', '--workspace', str(workspace), '--model', GROK_MODEL]
+            command = cursor_base_argv(cursor_bin) + ['--print', '--output-format', 'stream-json', '--workspace', str(workspace), '--model', GROK_MODEL]
             if args.trust:
                 command.append('--trust')
             if args.mode == 'ask':
@@ -838,8 +891,11 @@ def main(argv=None):
                     result_text, native_meta, saw_error = parse_grok_build_output(raw_out)
                 else:
                     result_text, native_meta, saw_error = parse_antigravity_output(raw_out)
+                preamble, _ = split_handoff(result_text)
                 result_text, work_status, step_limit_reached = classify_handoff(result_text, args.mode, native_meta.get('step_count', 0), step_budget if provider in ('muse', 'space-bunny') else None)
                 receipt.update(work_status=work_status, step_count=native_meta.get('step_count'), step_limit_reached=step_limit_reached)
+                if preamble.strip() and work_status != 'unreported':
+                    receipt['handoff_preamble'] = preamble[:1000]
                 (run/'result.txt').write_text(result_text + ('' if (not result_text or result_text.endswith('\n')) else '\n'))
                 model_reported = _scalar_model_reported(native_meta)
                 session_native = (native_meta.get('sessionID') or native_meta.get('session_id') or native_meta.get('sessionId')

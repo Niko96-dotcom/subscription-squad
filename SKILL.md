@@ -26,8 +26,8 @@ Scope, architecture decisions, shared contracts, disputed findings, and final ac
 | Structured source extraction, comparison tables, bounded log or source triage | `antigravity` ask (provisional extraction route) | Self-contained input packet only. |
 | Alternate implementation slice | `antigravity` work (selected alternate only) | Only for a concrete fit such as workspace-tool fit or an explicitly selected eligible alternate. Every candidate still needs tests and independent review. |
 | Independent code review, contradiction checks, disputed diagnosis | `grok` through Cursor ask (primary review route) | Supply actual diff, surrounding source, acceptance criteria, and check evidence. Use no tools when the packet suffices. |
-| Alternate read-only analysis or review | `grok-build` ask | Select only for an observed transport or account fit. Same model family as Cursor Grok, not extra model diversity. |
-| Native Grok implementation | Off the default path | The runner supports work, but repeated trials cancelled without edits. Retry only as a bounded useful retest with acceptance evidence and stated selection. |
+| Alternate read-only review when Cursor Grok is unavailable or disputed | `antigravity` ask | Same self-contained packet as the Grok review. A different model family, so it also adds diversity. |
+| Native Grok Build ask or work | Off the default path | 0 of 5 real ask reviews on 2026-09-23/24 returned a verdict (four timeouts, one `stopReason: cancelled` in plan mode), and work trials cancelled without edits. Retry only as a bounded, stated retest with acceptance evidence. |
 
 There is no universal intelligence ranking among these models. A different provider is not automatically approved for sensitive material merely because Muse is unsuitable. Antigravity effort is always `high`, never `xhigh`; Space Bunny uses its advertised `max` variant. See the dated [matched trial](references/space-bunny-evaluation.md) before expanding Space Bunny's role.
 
@@ -46,7 +46,7 @@ These are real boundaries, not accidental permission gates:
 
 Defaults, not hard caps. For a larger task, state a larger finite budget before dispatch within the authorized scope.
 
-Default per task: six total external calls including failures; at most two concurrent workers in separate workspaces; at most two implementation attempts per package; up to 900 seconds per call. Reserve two calls for review and repair; do not spend the whole budget on initial audits. A third concurrent worker needs a real independent bottleneck. Default package: one outcome with roughly 1–4 production files plus focused tests. Freeze the behavior contract and acceptance examples before parallel work; assign shared interfaces to one owner.
+Default per task: six total external calls including failures; at most two concurrent workers in separate workspaces; at most two implementation attempts per package; up to 900 seconds per call (1200 seconds for Cursor Grok reviews). Reserve two calls for review and repair; do not spend the whole budget on initial audits. A third concurrent worker needs a real independent bottleneck. Default package: one outcome with roughly 1–4 production files plus focused tests. Freeze the behavior contract and acceptance examples before parallel work; assign shared interfaces to one owner.
 
 On partial results, preserve the delivered work and give its owner a smaller continuation with exact remaining requirements. On failed checks, return the actual failing command, error excerpt, relevant current files, and original contract; substantive repairs stay delegated, with Astra handling only mechanical integration fixes locally. After repeated failure, narrow the package or explicitly select an eligible alternate.
 
@@ -56,7 +56,7 @@ No silent fallback. Stop a route on quota, authentication, or billing errors. An
 
 Define completion so execution persists through required verification; do not stop at a candidate.
 
-- Ordinary feature or fix: contract → Muse implements and authors focused tests → Astra runs checks → Cursor Grok reviews → owner repairs material findings → affected checks rerun → Astra accepts. If the defect is already understood, add no diagnosis call.
+- Ordinary feature or fix: contract → Muse implements and authors focused tests → Astra runs checks → Cursor Grok reviews a frozen snapshot → owner repairs material findings → affected checks rerun → Astra accepts. If the defect is already understood, add no diagnosis call.
 - Unclear bug: collect existing reproduction, logs, and failure output → one worker investigates or builds a regression test → owner repairs → checks and independent review. Add a second opinion only for conflicting evidence or a consequential open question.
 - Large feature: one owner for shared interfaces, then independent slices in separate workspaces. Start with two workers. Review combined changes at a stable integration point, including interactions. Do not split one cohesive change merely to keep every model busy. Gemini may own a suitable slice; it is never assigned one automatically.
 - Research, and architecture needing external sources: follow [research](references/research.md). Do not force extraction-then-synthesis when one worker suffices. Astra owns constraints and the final choice; add a challenge for consequential, contested, or high-ambiguity claims once a draft exists, with no challenger for trivial work.

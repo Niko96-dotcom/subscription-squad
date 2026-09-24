@@ -11,6 +11,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 RUN_LIMIT = 100
@@ -31,11 +32,17 @@ def parse_args(argv):
         help="preview limit, 200..20000",
     )
     ap.add_argument("--max-new-results", type=int, default=2, help="deliver at most 1..10 new handoffs per call (default 2)")
+    ap.add_argument("--wait", type=float, default=0, help="wait up to SECONDS for a new terminal result (0..3600, default 0)")
+    ap.add_argument("--poll", type=float, default=5, help="poll interval in SECONDS between wait peeks (0.05..60, default 5)")
     args = ap.parse_args(argv)
     if not 1 <= args.max_new_results <= 10:
         ap.error("--max-new-results must be in range 1..10")
     if not 200 <= args.max_result_chars <= 20000:
         ap.error("--max-result-chars must be in range 200..20000")
+    if not 0 <= args.wait <= 3600:
+        ap.error("--wait must be in range 0..3600")
+    if not 0.05 <= args.poll <= 60:
+        ap.error("--poll must be in range 0.05..60")
     return args
 
 
@@ -139,27 +146,151 @@ def _atomic_write(state_path, data):
         raise
 
 
+def _wait_should_stop(run_root, state_path):
+    """Read-only peek for --wait: True when the normal pass should proceed.
+
+    True when at least one undelivered terminal run exists (case a), when
+    no run is still running (case b), or when the peek itself hits an
+    error (fall through so the normal pass reports errors as today).
+    False means keep waiting. Never writes state, never takes the lock.
+    Reuses the scan pattern, receipt decoding, _run_entry, and _load_state
+    so 'terminal' and 'delivered' match the normal pass.
+    """
+    try:
+        if not run_root.is_dir():
+            return True
+        try:
+            children = [
+                p for p in run_root.iterdir() if p.is_dir() and (p / "receipt.json").is_file()
+            ]
+        except Exception:
+            return True
+        children.sort(key=lambda p: p.name)
+        if len(children) > RUN_LIMIT:
+            return True
+        delivered, state_err = _load_state(state_path)
+        if state_err is not None:
+            return True
+        allowed = {"running", "candidate", "incomplete", "worker_failed", "error", "timeout", "interrupted", "scope_violation", "unverified_preservation"}
+        has_running = False
+        for child in children:
+            rp = child / "receipt.json"
+            try:
+                raw = rp.read_bytes()
+            except Exception:
+                continue
+            try:
+                rec = json.loads(raw.decode("utf-8"))
+            except Exception:
+                continue
+            if not isinstance(rec, dict):
+                continue
+            if rec.get("status") not in allowed or not isinstance(rec.get("changed_paths", []), list):
+                continue
+            entry = _run_entry(child.name, rec)
+            status = entry.get("status")
+            if status == "running":
+                has_running = True
+                continue
+            result_path = child / "result.txt"
+            try:
+                if not result_path.is_file():
+                    continue
+                rraw = result_path.read_bytes()
+            except Exception:
+                continue
+            h_raw = hashlib.sha256(rraw).hexdigest()
+            h_stripped = None
+            if rraw.endswith(b"\n"):
+                h_stripped = hashlib.sha256(rraw[:-1]).hexdigest()
+            declared = rec.get("result_sha256")
+            if not isinstance(declared, str):
+                continue
+            decl = declared.strip()
+            matched = None
+            if decl.lower() == h_raw.lower():
+                matched = h_raw
+            elif h_stripped is not None and decl.lower() == h_stripped.lower():
+                matched = h_stripped
+            else:
+                continue
+            try:
+                receipt_resolved = str(rp.resolve())
+            except Exception:
+                try:
+                    receipt_resolved = str(rp.absolute())
+                except Exception:
+                    continue
+            receipt_sha = hashlib.sha256(raw).hexdigest()
+            key = "%s|%s|%s" % (receipt_resolved, receipt_sha, matched)
+            if key not in delivered:
+                return True
+        if not has_running:
+            return True
+        return False
+    except Exception:
+        return True
+
+
 def main(argv=None):
     args = parse_args(argv)
     run_root = Path(args.run_root)
     state_path = Path(args.state)
     max_chars = args.max_result_chars
+    wait_secs = args.wait
+    poll_secs = args.poll
+    wait_active = wait_secs > 0
+    waited_seconds = 0.0
+    wait_timed_out = False
+    if wait_active:
+        w_start = time.monotonic()
+        w_deadline = w_start + wait_secs
+        w_timed_out = False
+        while True:
+            try:
+                w_stop = _wait_should_stop(run_root, state_path)
+            except Exception:
+                w_stop = True
+            if w_stop:
+                w_timed_out = False
+                break
+            w_now = time.monotonic()
+            if w_now >= w_deadline:
+                w_timed_out = True
+                break
+            try:
+                time.sleep(max(0.0, min(poll_secs, w_deadline - w_now)))
+            except Exception:
+                w_timed_out = False
+                break
+        try:
+            w_end = time.monotonic()
+            waited_seconds = float(round(w_end - w_start, 3))
+        except Exception:
+            waited_seconds = 0.0
+        wait_timed_out = bool(w_timed_out)
+
+    def _emit(payload):
+        if wait_active:
+            payload["waited_seconds"] = waited_seconds
+            payload["wait_timed_out"] = wait_timed_out
+        return _dump(payload)
 
     if not run_root.is_dir():
-        print(_dump({"runs": [], "new_results": [], "errors": [{"error": "run root not a directory"}]}))
+        print(_emit({"runs": [], "new_results": [], "errors": [{"error": "run root not a directory"}]}))
         return 1
     try:
         children = [
             p for p in run_root.iterdir() if p.is_dir() and (p / "receipt.json").is_file()
         ]
     except Exception as exc:
-        print(_dump({"runs": [], "new_results": [], "errors": [{"error": "cannot scan run root: %s" % exc}]}))
+        print(_emit({"runs": [], "new_results": [], "errors": [{"error": "cannot scan run root: %s" % exc}]}))
         return 1
     children.sort(key=lambda p: p.name)
 
     if len(children) > RUN_LIMIT:
         print(
-            _dump(
+            _emit(
                 {
                     "runs": [],
                     "new_results": [],
@@ -177,7 +308,7 @@ def main(argv=None):
     if state_resolved.name in PROTECTED_NAMES:
         runs, perr = _snapshot_runs(children)
         perr.append({"error": "state file must not overwrite %s" % state_resolved.name})
-        print(_dump({"runs": runs, "new_results": [], "errors": perr}))
+        print(_emit({"runs": runs, "new_results": [], "errors": perr}))
         return 1
 
     for c in children:
@@ -188,7 +319,7 @@ def main(argv=None):
         if _within(state_resolved, cres):
             runs, perr = _snapshot_runs(children)
             perr.append({"error": "state file must live outside every run directory"})
-            print(_dump({"runs": runs, "new_results": [], "errors": perr}))
+            print(_emit({"runs": runs, "new_results": [], "errors": perr}))
             return 1
 
     state_path = state_resolved
@@ -196,26 +327,26 @@ def main(argv=None):
     try:
         lock_path.parent.mkdir(parents=True, exist_ok=True)
     except Exception as exc:
-        print(_dump({"runs": [], "new_results": [], "errors": [{"error": "cannot create state dir: %s" % exc}]}))
+        print(_emit({"runs": [], "new_results": [], "errors": [{"error": "cannot create state dir: %s" % exc}]}))
         return 1
     try:
         lock_f = open(lock_path, "a+")
     except Exception as exc:
-        print(_dump({"runs": [], "new_results": [], "errors": [{"error": "cannot open lockfile: %s" % exc}]}))
+        print(_emit({"runs": [], "new_results": [], "errors": [{"error": "cannot open lockfile: %s" % exc}]}))
         return 1
 
     try:
         try:
             fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            print(_dump({"runs": [], "new_results": [], "errors": [{"error": "collection state is locked; retry after the active collector exits"}]}))
+            print(_emit({"runs": [], "new_results": [], "errors": [{"error": "collection state is locked; retry after the active collector exits"}]}))
             return 1
         try:
             delivered, state_err = _load_state(state_path)
             if state_err is not None:
                 runs, perr = _snapshot_runs(children)
                 perr.append({"error": state_err})
-                print(_dump({"runs": runs, "new_results": [], "errors": perr}))
+                print(_emit({"runs": runs, "new_results": [], "errors": perr}))
                 return 1
 
             runs = []
@@ -323,10 +454,10 @@ def main(argv=None):
                     _atomic_write(state_path, {"version": 1, "delivered": merged})
                 except Exception as exc:
                     errors.append({"error": "cannot write state: %s" % exc})
-                    print(_dump({"runs": runs, "new_results": [], "errors": errors}))
+                    print(_emit({"runs": runs, "new_results": [], "errors": errors}))
                     return 1
 
-            print(_dump({"runs": runs, "new_results": new_results, "errors": errors}))
+            print(_emit({"runs": runs, "new_results": new_results, "errors": errors}))
             return 1 if errors else 0
         finally:
             try:
