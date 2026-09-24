@@ -71,9 +71,18 @@ For other agent CLIs, install [the portable entrypoint](adapters/portable/SKILL.
 as `SKILL.md` in that CLI's personal `skills/subscription-squad` directory,
 alongside exact copies of this repository's `scripts/` and `references/`.
 The portable entrypoint is explicit-use and prevents a worker launched by the
-runner from dispatching another worker. Claude Code may instead retain its
-own coordinator and relay adapter while syncing the shared scripts and
-references; do not overwrite a host-specific entrypoint with Codex wording.
+runner from dispatching another worker.
+
+Claude Code uses its own coordinator adapter in [adapters/claude](adapters/claude):
+install [its SKILL.md](adapters/claude/SKILL.md) with `scripts/` and `references/`
+in `~/.claude/skills/subscription-squad`, copy
+[agents/squad-relay.md](adapters/claude/agents/squad-relay.md) and
+[agents/muse.md](adapters/claude/agents/muse.md) to `~/.claude/agents/`, and
+optionally add [the global routing section](adapters/claude/CLAUDE-squad-section.md)
+to `~/.claude/CLAUDE.md` so Claude routes substantive work through the squad
+without being asked. Do not overwrite a host-specific entrypoint with Codex
+wording; when this repository changes, sync `scripts/` and `references/` and
+port policy changes into the Claude adapter by hand.
 
 See [SKILL.md](SKILL.md) for when to invoke, budgets, preflight,
 and brief/collect rules.
